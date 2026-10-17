@@ -10,12 +10,15 @@
   <title>Vigilante de precios</title>
   <link rel="icon" href="icono.png">
   <link rel="apple-touch-icon" href="icono.png">
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <header class="cabecera">
     <div>
       <h1>Vigilante de precios</h1>
+      <label id="selector-perfil" class="selector-perfil" hidden>Viendo:
+        <select id="perfil" aria-label="Perfil"></select>
+      </label>
       <p id="estado" class="tenue">Cargando…</p>
     </div>
     <div class="acciones" id="acciones" hidden>
@@ -92,6 +95,6 @@
   </dialog>
 
   <div id="aviso" class="aviso" hidden></div>
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

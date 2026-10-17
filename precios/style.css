@@ -204,3 +204,28 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .pie-pagina .btn-texto { color: var(--tenue); font-size: 13px; }
 .min0 { min-width: 0; }
 .der { text-align: right; }
+
+/* ===== Selector de perfil (solo administrador) ===== */
+.selector-perfil { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 2px; font-size: 13px; color: var(--tenue); }
+.selector-perfil select {
+  font: inherit; font-size: 14px; font-weight: 600; color: var(--texto); background: var(--tarjeta);
+  border: 1px solid var(--borde); border-radius: 8px; padding: 4px 8px; cursor: pointer;
+}
+body.perfil-ajeno { border-top: 5px solid #d97706; }
+body.perfil-ajeno .selector-perfil select { border-color: #d97706; color: #b45309; }
+@media (prefers-color-scheme: dark) {
+  body.perfil-ajeno .selector-perfil select { color: #fbbf24; }
+}
+
+/* Móvil: dos tarjetas por fila */
+@media (max-width: 520px) {
+  main { padding: 0 12px 50px; }
+  .cabecera { padding: 18px 12px 14px; }
+  .rejilla { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .img-caja { padding: 8px; }
+  .info { padding: 10px; }
+  .info .precio { font-size: 19px; }
+  .lista-ofertas { grid-template-columns: 1fr; }
+  .oferta-item { grid-template-columns: 52px 1fr; }
+  .oferta-item .btn.oferta { grid-column: 1 / -1; justify-content: center; }
+}

@@ -1,11 +1,19 @@
 // app.js - Web del Vigilante de precios.
-// Lee y guarda los datos en tu repositorio de GitHub (API de GitHub + tu llave)
-// y lanza la comprobación de precios (GitHub Actions) cuando pulsas "Comprobar".
+// Lee y guarda los datos en el repositorio privado de cada persona (API de GitHub + su llave)
+// y lanza la comprobación de precios (GitHub Actions) cuando se pulsa "Comprobar".
+
+// ===== Perfiles =====
+// Cada perfil es un repositorio privado con sus datos. La llave de cada persona decide
+// qué perfiles puede abrir: si abre varios (el administrador), aparece un selector.
+// Para añadir a alguien: crear su repositorio (copia de precios-perfil2) y añadirlo aquí.
+const PERFILES = [
+  { repo: "WEBS", nombre: "Mis productos" },
+  { repo: "precios-perfil2", nombre: "Perfil 2" },
+];
 
 // ===== Configuración =====
 const CONFIG = {
   owner: "HoJaiRu",
-  repo: "WEBS",
   rama: "main",
   workflow: "precios-vigilar.yml",
   intervaloHoras: 3,     // igual que el "cron" del workflow
@@ -17,9 +25,12 @@ const RUTA = {
   historial: "precios/datos/historial.json",
 };
 const CLAVE_TOKEN = "vigilante-precios.token";
+const CLAVE_PERFIL = "vigilante-precios.perfil";
 
 const $ = (sel, el = document) => el.querySelector(sel);
 let token = "";
+let perfiles = [];       // perfiles que abre la llave de este navegador
+let repo = "";           // repositorio del perfil que se está viendo
 let productosRaw = [];   // tal cual está en productos.json
 let estado = { enlaces: {} };
 let historial = {};
@@ -30,6 +41,8 @@ const comprobando = new Map();   // id de producto (o "*" = todos) -> hora en qu
 // ---------- Llave (token) guardada en este navegador ----------
 function leerToken() { try { return localStorage.getItem(CLAVE_TOKEN) || ""; } catch { return ""; } }
 function guardarToken(t) { try { t ? localStorage.setItem(CLAVE_TOKEN, t) : localStorage.removeItem(CLAVE_TOKEN); } catch {} }
+function leerPerfil() { try { return localStorage.getItem(CLAVE_PERFIL) || ""; } catch { return ""; } }
+function guardarPerfil(r) { try { localStorage.setItem(CLAVE_PERFIL, r); } catch {} }
 
 // ---------- API de GitHub ----------
 class ErrorGitHub extends Error {
@@ -68,7 +81,7 @@ async function gh(metodo, ruta, cuerpo, aceptar = "application/vnd.github+json")
   return datos;
 }
 
-const rutaContenido = (ruta) => `/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${ruta}?ref=${CONFIG.rama}`;
+const rutaContenido = (ruta) => `/repos/${CONFIG.owner}/${repo}/contents/${ruta}?ref=${CONFIG.rama}`;
 const deB64 = (b64) => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, "")), (c) => c.charCodeAt(0)));
 function aB64(texto) {
   let binario = "";
@@ -108,7 +121,7 @@ async function cambiarProductos(mensaje, cambio) {
       ...(sha ? { sha } : {}),
     };
     try {
-      await gh("PUT", `/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${RUTA.productos}`, cuerpo);
+      await gh("PUT", `/repos/${CONFIG.owner}/${repo}/contents/${RUTA.productos}`, cuerpo);
       productosRaw = lista;
       construir();
       pintar();
@@ -121,7 +134,7 @@ async function cambiarProductos(mensaje, cambio) {
 }
 
 async function lanzarComprobacion(productoId = "") {
-  await gh("POST", `/repos/${CONFIG.owner}/${CONFIG.repo}/actions/workflows/${CONFIG.workflow}/dispatches`,
+  await gh("POST", `/repos/${CONFIG.owner}/${repo}/actions/workflows/${CONFIG.workflow}/dispatches`,
     { ref: CONFIG.rama, inputs: { producto: productoId } });
   comprobando.set(productoId || "*", Date.now());
   pintar();
@@ -238,11 +251,13 @@ function construir() {
 }
 
 async function cargar() {
+  const repoPedido = repo;
   const [p, e, h] = await Promise.all([
     leerProductos(),
     leerJSON(RUTA.estado, { enlaces: {} }),
     leerJSON(RUTA.historial, {}),
   ]);
+  if (repoPedido !== repo) return;   // se cambió de perfil mientras cargaba
   productosRaw = p.lista;
   estado = e || { enlaces: {} };
   historial = h || {};
@@ -566,16 +581,67 @@ function mostrar(conectado) {
   $("#conectar").hidden = conectado;
   $("#contenido").hidden = !conectado;
   $("#acciones").hidden = !conectado;
-  if (!conectado) $("#estado").textContent = "Sin conectar";
+  if (!conectado) {
+    $("#estado").textContent = "Sin conectar";
+    $("#selector-perfil").hidden = true;
+  }
 }
 
 function desconectar(motivo) {
   token = "";
+  perfiles = [];
+  repo = "";
   guardarToken("");
   mostrar(false);
   const err = $("#conectar-error");
   err.hidden = !motivo;
   err.textContent = motivo || "";
+}
+
+// Prueba la llave contra cada perfil y se queda con los que puede abrir
+async function detectarPerfiles() {
+  const pruebas = await Promise.allSettled(
+    PERFILES.map((p) => gh("GET", `/repos/${CONFIG.owner}/${p.repo}`)));
+  const fallo401 = pruebas.find((r) => r.status === "rejected" && r.reason.status === 401);
+  if (fallo401) throw fallo401.reason;
+  perfiles = PERFILES.filter((_, i) => pruebas[i].status === "fulfilled");
+  if (!perfiles.length) {
+    throw new ErrorGitHub("Esta llave no abre ningún perfil. Revisa a qué repositorio le diste acceso.", 404);
+  }
+  const guardado = leerPerfil();
+  repo = (perfiles.find((p) => p.repo === guardado) || perfiles[0]).repo;
+  pintarSelectorPerfil();
+}
+
+function pintarSelectorPerfil() {
+  const sel = $("#perfil");
+  sel.innerHTML = perfiles.map((p) =>
+    `<option value="${esc(p.repo)}" ${p.repo === repo ? "selected" : ""}>${esc(p.nombre)}</option>`).join("");
+  $("#selector-perfil").hidden = perfiles.length < 2;   // solo el administrador ve el selector
+  // Franja de color cuando el administrador está viendo el perfil de otra persona
+  document.body.classList.toggle("perfil-ajeno", perfiles.length > 1 && repo !== perfiles[0].repo);
+}
+
+async function cambiarPerfil(nuevo) {
+  if (nuevo === repo) return;
+  repo = nuevo;
+  guardarPerfil(repo);
+  pintarSelectorPerfil();
+  abiertos.clear();
+  comprobando.clear();
+  productosRaw = []; estado = { enlaces: {} }; historial = {};
+  construir();
+  pintar();
+  $("#estado").textContent = "Cargando…";
+  try { await cargar(); } catch (e) { avisar(e.message); }
+}
+
+$("#perfil").addEventListener("change", (ev) => cambiarPerfil(ev.target.value));
+
+async function entrar() {
+  await detectarPerfiles();
+  mostrar(true);
+  await cargar();
 }
 
 $("#form-conectar").addEventListener("submit", async (ev) => {
@@ -584,13 +650,13 @@ $("#form-conectar").addEventListener("submit", async (ev) => {
   boton.disabled = true;
   token = $("#token").value.trim();
   try {
-    await gh("GET", `/repos/${CONFIG.owner}/${CONFIG.repo}`);
+    await entrar();
     guardarToken(token);
     $("#token").value = "";
-    mostrar(true);
-    await cargar();
+    $("#conectar-error").hidden = true;
   } catch (e) {
     token = "";
+    mostrar(false);
     $("#conectar-error").hidden = false;
     $("#conectar-error").textContent = e.message;
   } finally {
@@ -604,17 +670,16 @@ $("#btn-desconectar").addEventListener("click", () => {
 
 // ---------- Arranque ----------
 async function refrescar() {
-  if (!token || comprobando.size) return;
+  if (!token || !repo || comprobando.size) return;
   try { await cargar(); } catch { /* se reintenta en el siguiente ciclo */ }
 }
 
 token = leerToken();
 if (token) {
-  mostrar(true);
-  cargar().catch((e) => avisar(e.message));
+  entrar().catch((e) => avisar(e.message));
 } else {
   mostrar(false);
 }
 setInterval(() => { if (!document.hidden) refrescar(); }, 120000);
-setInterval(() => { if (token && !comprobando.size) pintarEstado(); }, 30000);
+setInterval(() => { if (token && repo && !comprobando.size) pintarEstado(); }, 30000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refrescar(); });
