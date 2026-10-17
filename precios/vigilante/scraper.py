@@ -10,7 +10,7 @@ import json
 import re
 import time
 import base64
-from urllib.parse import parse_qs, quote_plus, urlparse
+from urllib.parse import parse_qs, quote_plus, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -392,8 +392,8 @@ def analizar(html, url):
                            "sin_precio", html)
 
     imagen = datos.get("imagen")
-    if imagen and imagen.startswith("//"):
-        imagen = "https:" + imagen
+    if imagen:
+        imagen = urljoin(url, imagen)  # algunas tiendas la dan relativa: "/media/foto.jpg"
     return {
         "precio": datos.get("precio"),
         "moneda": (datos.get("moneda") or "EUR").upper()[:3],

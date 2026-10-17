@@ -208,19 +208,31 @@ function avisar(texto) {
   avisar.t = setTimeout(() => (el.hidden = true), 4500);
 }
 
-const imagen = (p) => p.imagen
-  ? `<img src="${esc(p.imagen)}" alt="" loading="lazy">`
+// Foto del producto: la de la mejor oferta y, si no carga, la de las otras tiendas
+const imagen = (p) => p.imagenes.length
+  ? `<img src="${esc(p.imagenes[0])}" data-otras="${esc(p.imagenes.slice(1).join(" "))}" alt="" loading="lazy" referrerpolicy="no-referrer">`
   : `<div class="sin-img">🏷️</div>`;
 
-// Si una imagen no carga, pone el icono en su lugar
+// Si una imagen no carga, prueba la siguiente tienda y, si no queda ninguna, pone el icono
 document.addEventListener("error", (ev) => {
   if (ev.target.tagName === "IMG") {
+    const otras = (ev.target.dataset.otras || "").split(" ").filter(Boolean);
+    if (otras.length) {
+      ev.target.dataset.otras = otras.slice(1).join(" ");
+      ev.target.src = otras[0];
+      return;
+    }
     const div = document.createElement("div");
     div.className = "sin-img";
     div.textContent = "🏷️";
     ev.target.replaceWith(div);
   }
 }, true);
+
+// Las fotos guardadas antes podían venir relativas ("/media/foto.jpg"): se completan con la web de la tienda
+function urlImagen(img, url) {
+  try { return new URL(img, url).href; } catch { return img; }
+}
 
 // ---------- Unir productos + estado + historial ----------
 function construir() {
@@ -256,7 +268,7 @@ function construir() {
       descripcion: p.descripcion || "",
       enlaces,
       mejor,
-      imagen: mejor?.imagen || enlaces.find((e) => e.imagen)?.imagen || null,
+      imagenes: [...new Set([mejor, ...enlaces].filter((e) => e?.imagen).map((e) => urlImagen(e.imagen, e.url)))],
       oferta: Boolean(mejor && p.precio_deseado && mejor.total <= p.precio_deseado),
       agotado: !mejor && enlaces.some((e) => e.stock === false),
       minimo_30d: precios30.length ? Math.min(...precios30) : null,
