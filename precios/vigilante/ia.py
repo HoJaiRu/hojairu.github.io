@@ -106,6 +106,9 @@ def _pedir(prompt, herramientas=None, json_puro=False):
             if r.status_code == 404:          # ese modelo no existe: probar el siguiente
                 fallos.append(f"{modelo}: no disponible")
                 break
+            if r.status_code == 429 and "quota" in _mensaje(r).lower():
+                fallos.append(f"{modelo}: sin cupo (HTTP 429)")   # cupo agotado: esperar no sirve
+                break
             if r.status_code in (429, 500, 503) and intento < 2:
                 time.sleep(20 * (intento + 1))  # cupo por minuto o Gemini saturado
                 continue
