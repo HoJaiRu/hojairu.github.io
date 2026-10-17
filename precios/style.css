@@ -270,3 +270,5 @@ body.perfil-ajeno .selector-perfil select { border-color: #d97706; color: #b4530
 @media (max-width: 520px) {
   .tabla { display: block; overflow-x: auto; }
 }
+.error-item .rescate { font-size: 13px; color: #5b3cc4; margin-top: 2px; }
+@media (prefers-color-scheme: dark) { .error-item .rescate { color: #c4b5fd; } }

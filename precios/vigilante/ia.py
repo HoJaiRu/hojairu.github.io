@@ -4,12 +4,14 @@ ia.py - Todo lo que usa Gemini (la IA de Google).
 Solo funciona si el repositorio de datos tiene el secreto GEMINI_API_KEY.
 Sin él, el vigilante funciona igual que siempre, pero sin las funciones de IA.
 
-La IA solo busca y clasifica; los precios los lee siempre el lector (scraper.py).
+Los precios los lee el lector (scraper.py). La IA solo lee un precio como ÚLTIMO RECURSO, cuando el
+lector falla, y ese fallo se sigue mostrando en la zona de errores de la web.
 
 Funciones:
   buscar_tiendas()   Busca en Google dónde comprar un producto (con envío a España)
   revisar_enlaces()  Clasifica cada enlace: mismo producto, otra variante u otro producto
   consultar_envio()  Averigua los gastos de envío a España de cada tienda
+  leer_pagina()      Último recurso: saca el precio de una página que el lector no entiende
 """
 import json
 import os
@@ -296,3 +298,31 @@ Responde SOLO con JSON: {{"envios": [{{"id": "...", "envio_coste": null, "envio_
             if env:
                 res[str(f["id"])] = env
     return res
+
+
+# ---------- 4. Último recurso: leer una página que el lector no entiende ----------
+def leer_pagina(url, texto_pagina=None):
+    """Extrae los datos con IA. Si no hay texto (la tienda bloqueó la lectura), Gemini la abre él mismo."""
+    instrucciones = f"""Extrae los datos de esta ficha de producto de una tienda online.
+- "precio": precio actual de venta del producto (número, sin envío). Si hay varios, el de la opción seleccionada o el más visible. null si no aparece.
+- "moneda": código ISO (EUR, USD, GBP...).
+- "stock": true si se puede comprar, false si está agotado, null si no se sabe.
+- "titulo": nombre del producto en la página.
+{REGLAS_ENVIO}
+No inventes nada: si un dato no aparece, pon null.
+Responde SOLO con este JSON:
+{{"precio": null, "moneda": "EUR", "stock": null, "titulo": null, "envio_coste": null, "envio_gratis_desde": null, "envio_moneda": "EUR", "envio_nota": null}}"""
+    if texto_pagina:
+        texto, _ = _pedir(f"{instrucciones}\n\nURL: {url}\n\nTEXTO DE LA PÁGINA:\n{texto_pagina}", json_puro=True)
+    else:
+        texto, _ = _pedir(f"{instrucciones}\n\nAbre esta página: {url}", herramientas=["url_context"])
+    d = _json(texto)
+    if not isinstance(d, dict):
+        raise ErrorIA("La IA no devolvió datos legibles")
+    precio = _numero(d.get("precio"))
+    if not precio:
+        raise ErrorIA("Tampoco la IA encuentra el precio en la página")
+    stock = d.get("stock") if isinstance(d.get("stock"), bool) else None
+    return {"precio": precio, "moneda": str(d.get("moneda") or "EUR").upper()[:3],
+            "stock": stock, "titulo": (str(d.get("titulo") or "")[:300] or None),
+            "imagen": None, "envio": _envio(d)}

@@ -366,6 +366,7 @@ function detalle(p) {
     else if (e.veredicto === "variante") est = `<span class="chip duda" title="${esc(e.motivo)}">⚠ Variante</span>`;
     else if (e.ultima_lectura) est = `<span class="chip ok">✓ OK</span>`;
     else est = `<span class="chip gris">Pendiente</span>`;
+    if (e.aviso_lector && !e.error) est += ` <span class="chip ia" title="El lector falló (${esc(e.aviso_lector)}). Precio leído por la IA como último recurso">✨ IA</span>`;
     const precioOriginal = e.precio != null && e.moneda !== "EUR"
       ? `<div class="tenue">${dinero(e.precio, e.moneda)}</div>` : "";
     return `
@@ -439,12 +440,13 @@ function sugerencias(p, buscando) {
     const chip = v === "no" ? `<span class="chip ko">✗ Otro producto</span>`
       : v === "variante" ? `<span class="chip duda">⚠ Variante</span>`
       : c.stock === false ? `<span class="chip gris">Agotado</span>` : "";
+    const ia = c.aviso_lector ? ` <span class="chip ia" title="El lector no pudo leer esta tienda; el precio lo ha leído la IA">✨ IA</span>` : "";
     const envio = c.envio_eur == null ? "envío ¿?" : c.envio_eur === 0 ? "envío gratis" : `+${dinero(c.envio_eur)} envío`;
     return `
       <label class="sugerencia">
         <input type="checkbox" name="sug" value="${esc(c.url)}" ${v === "si" && c.stock !== false ? "checked" : ""}>
         <span class="min0">
-          <span class="sug-cab"><span class="sug-tienda">${esc(c.tienda)}</span> ${chip}</span>
+          <span class="sug-cab"><span class="sug-tienda">${esc(c.tienda)}</span> ${chip}${ia}</span>
           <span class="sug-titulo" title="${esc(c.titulo || "")}">${esc(c.titulo || c.url)}</span>
           ${c.coincide?.motivo && v !== "si" ? `<span class="tenue">${esc(c.coincide.motivo)}</span>` : ""}
         </span>
@@ -485,7 +487,8 @@ async function cargarBusqueda(id) {
 }
 
 function pintarErrores() {
-  const errores = productos.flatMap((p) => p.enlaces.filter((e) => e.error).map((e) => ({ p, e })));
+  // Fallos del lector: también los que luego ha salvado la IA (último recurso)
+  const errores = productos.flatMap((p) => p.enlaces.filter((e) => e.error || e.aviso_lector).map((e) => ({ p, e })));
   // Avisos de la IA: enlaces que quizá no son el mismo producto
   const dudas = productos.flatMap((p) => p.enlaces
     .filter((e) => !e.error && (e.veredicto === "no" || e.veredicto === "variante")).map((e) => ({ p, e })));
@@ -493,7 +496,9 @@ function pintarErrores() {
   const htmlErrores = errores.map(({ p, e }) => `
         <div class="error-item">
           <div><div class="prod" data-ir="${esc(p.id)}">${esc(p.nombre)}</div><div class="tenue">${esc(e.tienda)} · ${hace(e.ultima_lectura)}</div></div>
-          <div><div class="motivo">${esc(e.error)}</div><div class="url">${esc(e.url)}</div></div>
+          <div><div class="motivo">${esc(e.error || e.aviso_lector)}</div>
+            ${!e.error && e.aviso_lector ? `<div class="rescate">✨ La IA ha leído el precio como último recurso: ${dinero(e.precio, e.moneda)}. Revísalo en la tienda.</div>` : ""}
+            <div class="url">${esc(e.url)}</div></div>
           <a class="btn" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">Abrir ↗</a>
         </div>`).join("");
   const htmlDudas = dudas.map(({ p, e }) => `
