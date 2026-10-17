@@ -23,7 +23,15 @@ except ImportError:  # pragma: no cover
 
 
 class ErrorLectura(Exception):
-    """Error 'esperado' al leer una tienda. El texto se muestra en la zona de errores."""
+    """Error 'esperado' al leer una tienda. El texto se muestra en la zona de errores.
+
+    tipo: "conexion", "404", "bloqueo", "http" o "sin_precio".
+    html: la página descargada (si se llegó a descargar), para que la IA pueda leerla.
+    """
+    def __init__(self, mensaje, tipo="otro", html=None):
+        super().__init__(mensaje)
+        self.tipo = tipo
+        self.html = html
 
 
 CABECERAS = {"Accept-Language": "es-ES,es;q=0.9,en;q=0.8"}
@@ -81,7 +89,9 @@ def nombre_tienda(url):
         host = host[4:]
     for clave, nombre in NOMBRES_TIENDA.items():
         if clave in host:
-            return nombre
+            pais = host.rsplit(".", 1)[-1]
+            # Tiendas de otros países: "Amazon (DE)", "Fnac (FR)"... (amazon.co.uk -> UK)
+            return nombre if pais in ("es", "com") else f"{nombre} ({pais.upper()})"
     return host or "Tienda"
 
 
@@ -163,6 +173,35 @@ def _primera_imagen(img):
     return None
 
 
+def _envio_oferta(o):
+    """Gastos de envío publicados en la oferta (schema.org OfferShippingDetails), preferiblemente a España."""
+    detalles = o.get("shippingDetails")
+    detalles = detalles if isinstance(detalles, list) else [detalles]
+    elegido = None
+    for d in detalles:
+        if not isinstance(d, dict):
+            continue
+        destino = json.dumps(d.get("shippingDestination") or "").upper()
+        if elegido is None or '"ES"' in destino or "SPAIN" in destino or "ESPA" in destino:
+            elegido = d
+    if not elegido:
+        return None
+    tarifa = elegido.get("shippingRate")
+    tarifa = tarifa[0] if isinstance(tarifa, list) and tarifa else tarifa
+    if not isinstance(tarifa, dict):
+        return None
+    coste = tarifa.get("value", tarifa.get("price"))
+    if coste in (None, ""):
+        return None
+    try:
+        coste = float(str(coste).replace(",", "."))
+    except ValueError:
+        return None
+    return {"coste": coste, "gratis_desde": None,
+            "moneda": (tarifa.get("currency") or tarifa.get("priceCurrency") or "EUR").upper()[:3],
+            "nota": None, "fuente": "tienda"}
+
+
 def _datos_oferta(o):
     if not isinstance(o, dict):
         return None
@@ -175,7 +214,8 @@ def _datos_oferta(o):
         precio = spec.get("price")
         moneda = moneda or spec.get("priceCurrency")
     return {"precio": leer_precio_texto(precio, estructurado=True),
-            "moneda": moneda, "stock": _estado_stock(o.get("availability"))}
+            "moneda": moneda, "stock": _estado_stock(o.get("availability")),
+            "envio": _envio_oferta(o)}
 
 
 def _mejor_oferta(ofertas):
@@ -298,14 +338,14 @@ def descargar(url, imitar="chrome"):
     except Exception as e:
         msg = str(e).lower()
         if "timed out" in msg or "timeout" in msg:
-            raise ErrorLectura("La tienda no responde (tiempo de espera agotado)")
-        raise ErrorLectura("No se pudo conectar con la tienda (¿enlace mal copiado o sin internet?)")
+            raise ErrorLectura("La tienda no responde (tiempo de espera agotado)", "conexion")
+        raise ErrorLectura("No se pudo conectar con la tienda (¿enlace mal copiado o sin internet?)", "conexion")
     if r.status_code == 404:
-        raise ErrorLectura("Página no encontrada (404): el producto puede haberse retirado")
+        raise ErrorLectura("Página no encontrada (404): el producto puede haberse retirado", "404")
     if r.status_code in (401, 403, 429, 503):
-        raise ErrorLectura(f"La tienda bloquea la lectura automática (HTTP {r.status_code})")
+        raise ErrorLectura(f"La tienda bloquea la lectura automática (HTTP {r.status_code})", "bloqueo")
     if r.status_code >= 400:
-        raise ErrorLectura(f"La tienda devolvió un error (HTTP {r.status_code})")
+        raise ErrorLectura(f"La tienda devolvió un error (HTTP {r.status_code})", "http")
     return r.text
 
 
@@ -321,8 +361,9 @@ def analizar(html, url):
     if not datos.get("precio") and datos.get("stock") is not False:
         texto = html[:200000].lower()
         if any(m in texto for m in MARCAS_BLOQUEO):
-            raise ErrorLectura("La tienda ha mostrado un captcha o bloqueo anti-bots")
-        raise ErrorLectura("No encuentro el precio en la página (puede que la tienda lo cargue con JavaScript)")
+            raise ErrorLectura("La tienda ha mostrado un captcha o bloqueo anti-bots", "bloqueo", html)
+        raise ErrorLectura("No encuentro el precio en la página (puede que la tienda lo cargue con JavaScript)",
+                           "sin_precio", html)
 
     imagen = datos.get("imagen")
     if imagen and imagen.startswith("//"):
@@ -333,6 +374,7 @@ def analizar(html, url):
         "stock": datos.get("stock"),
         "imagen": imagen,
         "titulo": (datos.get("titulo") or "")[:300] or None,
+        "envio": datos.get("envio"),
     }
 
 
@@ -348,3 +390,28 @@ def comprobar(url):
             raise
         time.sleep(6)  # a veces basta con reintentar
         return analizar(descargar(movil, imitar="safari_ios"), movil)
+
+
+# ---------- Ayudas para la IA ----------
+def texto_para_ia(html, maximo=25000):
+    """Texto visible de la página (sin menús ni scripts), recortado para mandarlo a la IA."""
+    soup = BeautifulSoup(html, "html.parser")
+    extra = []
+    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        extra.append((tag.string or tag.get_text() or "")[:3000])
+    for tag in soup(["script", "style", "noscript", "svg", "nav", "footer", "iframe"]):
+        tag.decompose()
+    titulo = soup.title.get_text(strip=True) if soup.title else ""
+    texto = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
+    return (f"TÍTULO: {titulo}\n{texto}\n\nDATOS ESTRUCTURADOS:\n" + "\n".join(extra))[:maximo]
+
+
+def resolver_redireccion(url):
+    """Los enlaces que cita Google pasan por una redirección: devuelve la dirección final."""
+    try:
+        r = http.get(url, headers=CABECERAS, timeout=15, allow_redirects=False,
+                     **({"impersonate": "chrome"} if IMITA_CHROME else {}))
+        destino = r.headers.get("location") or r.headers.get("Location")
+        return destino if destino and destino.startswith("http") else None
+    except Exception:
+        return None

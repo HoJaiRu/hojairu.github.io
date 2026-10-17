@@ -1,6 +1,8 @@
 // app.js - Web del Vigilante de precios.
 // Lee y guarda los datos en el repositorio privado de cada persona (API de GitHub + su llave)
 // y lanza la comprobación de precios (GitHub Actions) cuando se pulsa "Comprobar".
+// La búsqueda de tiendas con IA también corre en GitHub Actions (ver vigilante/ia.py):
+// la web solo la lanza y luego lee el resultado de datos/busquedas/<producto>.json.
 
 // ===== Perfiles =====
 // Cada perfil es un repositorio privado con sus datos. La llave de cada persona decide
@@ -23,6 +25,7 @@ const RUTA = {
   productos: "precios/productos.json",
   estado: "precios/datos/estado.json",
   historial: "precios/datos/historial.json",
+  busqueda: (id) => `precios/datos/busquedas/${id}.json`,
 };
 const CLAVE_TOKEN = "vigilante-precios.token";
 const CLAVE_PERFIL = "vigilante-precios.perfil";
@@ -35,8 +38,9 @@ let productosRaw = [];   // tal cual está en productos.json
 let estado = { enlaces: {} };
 let historial = {};
 let productos = [];      // productos con sus precios, listos para pintar
+let busquedas = {};       // id de producto -> resultado de la búsqueda con IA (se lee al abrir el producto)
 const abiertos = new Set();
-const comprobando = new Map();   // id de producto (o "*" = todos) -> hora en que se pidió
+const comprobando = new Map();   // id de producto (o "*" = todos, o "buscar:id") -> hora en que se pidió
 
 // ---------- Llave (token) guardada en este navegador ----------
 function leerToken() { try { return localStorage.getItem(CLAVE_TOKEN) || ""; } catch { return ""; } }
@@ -133,10 +137,10 @@ async function cambiarProductos(mensaje, cambio) {
   }
 }
 
-async function lanzarComprobacion(productoId = "") {
+async function lanzarComprobacion(productoId = "", accion = "comprobar") {
   await gh("POST", `/repos/${CONFIG.owner}/${repo}/actions/workflows/${CONFIG.workflow}/dispatches`,
-    { ref: CONFIG.rama, inputs: { producto: productoId } });
-  comprobando.set(productoId || "*", Date.now());
+    { ref: CONFIG.rama, inputs: { producto: productoId, accion } });
+  comprobando.set(accion === "buscar" ? "buscar:" + productoId : (productoId || "*"), Date.now());
   pintar();
   vigilarComprobacion();
 }
@@ -223,18 +227,29 @@ function construir() {
   const enlacesEstado = estado.enlaces || {};
   const hace30 = new Date(Date.now() - 30 * 864e5).toISOString();
   productos = productosRaw.map((p) => {
-    const enlaces = (p.enlaces || []).map((e) => ({
-      precio: null, moneda: "EUR", stock: null, imagen: null, error: null, ultima_lectura: null,
-      tienda: tiendaDe(e.url),
-      ...(enlacesEstado[e.id] || {}),
-      id: e.id, url: e.url,
-    }));
-    const validos = enlaces.filter((e) => e.precio != null && e.stock !== false && !e.error);
-    const mejor = validos.length ? validos.reduce((a, b) => (b.precio < a.precio ? b : a)) : null;
+    const enlaces = (p.enlaces || []).map((e) => {
+      const est = { precio: null, moneda: "EUR", stock: null, imagen: null, error: null, ultima_lectura: null,
+        tienda: tiendaDe(e.url), ...(enlacesEstado[e.id] || {}) };
+      // Precio final = precio en euros + envío (el envío escrito a mano manda sobre el de la tienda o la IA)
+      const precioEur = est.precio_eur ?? (est.moneda === "EUR" ? est.precio : null);
+      const envio = e.envio ?? est.envio_eur ?? null;
+      const veredicto = e.coincide_ok ? "si" : est.coincide?.veredicto;
+      return {
+        ...est, id: e.id, url: e.url,
+        precio_eur: precioEur,
+        envio_eur: envio,
+        envio_fuente: e.envio != null ? "manual" : est.envio_fuente,
+        total: precioEur != null ? Math.round((precioEur + (envio || 0)) * 100) / 100 : null,
+        veredicto,
+        motivo: est.coincide?.motivo || "",
+      };
+    });
+    const validos = enlaces.filter((e) => e.total != null && e.stock !== false && !e.error && e.veredicto !== "no");
+    const mejor = validos.length ? validos.reduce((a, b) => (b.total < a.total ? b : a)) : null;
     const precios30 = enlaces.flatMap((e) => (historial[e.id] || [])
       .filter(([fecha, precio, stock]) => fecha >= hace30 && precio != null && stock !== false)
       .map(([, precio]) => precio));
-    if (mejor) precios30.push(mejor.precio);
+    if (mejor) precios30.push(mejor.precio_eur);
     const lecturas = enlaces.map((e) => e.ultima_lectura).filter(Boolean).sort();
     return {
       ...p,
@@ -242,7 +257,7 @@ function construir() {
       enlaces,
       mejor,
       imagen: mejor?.imagen || enlaces.find((e) => e.imagen)?.imagen || null,
-      oferta: Boolean(mejor && p.precio_deseado && mejor.precio <= p.precio_deseado),
+      oferta: Boolean(mejor && p.precio_deseado && mejor.total <= p.precio_deseado),
       agotado: !mejor && enlaces.some((e) => e.stock === false),
       minimo_30d: precios30.length ? Math.min(...precios30) : null,
       ultima_lectura: lecturas.at(-1) || null,
@@ -261,6 +276,8 @@ async function cargar() {
   productosRaw = p.lista;
   estado = e || { enlaces: {} };
   historial = h || {};
+  await Promise.all([...abiertos].map(cargarBusqueda));
+  if (repoPedido !== repo) return;
   construir();
   pintar();
 }
@@ -289,14 +306,14 @@ function pintarOfertas() {
   const ofertas = productos.filter((p) => p.oferta);
   $("#ofertas").hidden = ofertas.length === 0;
   $("#lista-ofertas").innerHTML = ofertas.map((p) => {
-    const ahorro = p.precio_deseado - p.mejor.precio;
+    const ahorro = p.precio_deseado - p.mejor.total;
     return `
       <div class="oferta-item" data-ir="${esc(p.id)}" title="Ver producto">
         ${imagen(p)}
         <div class="min0">
           <div class="nombre">${esc(p.nombre)}</div>
-          <div class="precio">${dinero(p.mejor.precio, p.mejor.moneda)}</div>
-          <div class="detalle-oferta">en ${esc(p.mejor.tienda)} · ${ahorro > 0 ? dinero(ahorro) + " por debajo de tu objetivo" : "justo tu objetivo"}</div>
+          <div class="precio">${dinero(p.mejor.total)}</div>
+          <div class="detalle-oferta">en ${esc(p.mejor.tienda)} · ${textoEnvio(p.mejor)} · ${ahorro > 0 ? dinero(ahorro) + " por debajo de tu objetivo" : "justo tu objetivo"}</div>
         </div>
         <a class="btn oferta" href="${esc(p.mejor.url)}" target="_blank" rel="noopener noreferrer">Ir a la tienda ↗</a>
       </div>`;
@@ -305,7 +322,7 @@ function pintarOfertas() {
 
 function textoPrecio(p) {
   if (comprobando.has(p.id) || comprobando.has("*")) return `<div class="precio sin"><span class="girando">↻</span> Comprobando…</div>`;
-  if (p.mejor) return `<div class="precio">${dinero(p.mejor.precio, p.mejor.moneda)}</div>`;
+  if (p.mejor) return `<div class="precio">${dinero(p.mejor.total)}</div>`;
   if (p.agotado) return `<div class="precio sin">Agotado</div>`;
   if (p.enlaces.length === 0) return `<div class="precio sin">Sin enlaces</div>`;
   if (!p.ultima_lectura) return `<div class="precio sin">Pendiente de comprobar</div>`;
@@ -317,7 +334,7 @@ function pintarProductos() {
   $("#productos").innerHTML = productos.map((p) => {
     const abierto = abiertos.has(p.id);
     const falta = p.mejor && p.precio_deseado && !p.oferta
-      ? `<div class="falta">a ${dinero(p.mejor.precio - p.precio_deseado)} de tu objetivo (${dinero(p.precio_deseado)})</div>`
+      ? `<div class="falta">a ${dinero(p.mejor.total - p.precio_deseado)} de tu objetivo (${dinero(p.precio_deseado)})</div>`
       : "";
     return `
       <article class="tarjeta ${abierto ? "abierta" : ""} ${p.oferta ? "es-oferta" : ""}" data-id="${esc(p.id)}">
@@ -326,7 +343,8 @@ function pintarProductos() {
           <div class="info">
             <div class="nombre">${esc(p.nombre)}</div>
             ${textoPrecio(p)}
-            ${p.mejor ? `<div class="meta">en ${esc(p.mejor.tienda)} · ${hace(p.mejor.ultima_lectura)}</div>` : ""}
+            ${p.mejor ? `<div class="meta">en ${esc(p.mejor.tienda)} · ${textoEnvio(p.mejor)}</div>` : ""}
+            ${comprobando.has("buscar:" + p.id) ? `<div class="meta"><span class="girando">✨</span> Buscando tiendas…</div>` : ""}
             ${falta}
           </div>
           ${abierto ? '<div class="cerrar">Cerrar ▲</div>' : ""}
@@ -338,17 +356,24 @@ function pintarProductos() {
 
 function detalle(p) {
   const ocupado = comprobando.has(p.id) || comprobando.has("*");
+  const buscando = comprobando.has("buscar:" + p.id);
   const filas = p.enlaces.map((e) => {
     const esMejor = p.mejor && p.mejor.id === e.id;
     let est;
     if (e.error) est = `<span class="chip ko" title="${esc(e.error)}">⚠ Error</span>`;
     else if (e.stock === false) est = `<span class="chip gris">Agotado</span>`;
+    else if (e.veredicto === "no") est = `<span class="chip ko" title="${esc(e.motivo)}">✗ Otro producto</span>`;
+    else if (e.veredicto === "variante") est = `<span class="chip duda" title="${esc(e.motivo)}">⚠ Variante</span>`;
     else if (e.ultima_lectura) est = `<span class="chip ok">✓ OK</span>`;
     else est = `<span class="chip gris">Pendiente</span>`;
+    if (e.fuente === "IA" && !e.error) est += ` <span class="chip ia" title="El lector no entendía esta página y el precio lo ha leído la IA">✨ IA</span>`;
+    const precioOriginal = e.precio != null && e.moneda !== "EUR"
+      ? `<div class="tenue">${dinero(e.precio, e.moneda)}</div>` : "";
     return `
       <tr class="${esMejor ? "mejor" : ""}">
         <td class="tienda"><a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer" title="${esc(e.url)}">${esc(e.tienda)} ↗</a></td>
-        <td class="p">${e.precio != null ? dinero(e.precio, e.moneda) : "—"}</td>
+        <td class="p">${e.total != null ? dinero(e.total) : "—"}${precioOriginal}</td>
+        <td class="col-envio"><button class="btn-envio" data-envio="${esc(e.id)}" title="${esc(tituloEnvio(e))}">${celdaEnvio(e)}</button></td>
         <td>${est}</td>
         <td class="tenue col-fecha">${hace(e.ultima_lectura)}</td>
         <td class="der"><button class="btn-x" data-borrar-enlace="${esc(e.id)}" title="Quitar enlace">×</button></td>
@@ -365,15 +390,18 @@ function detalle(p) {
         <div class="botones">
           <button class="btn primario" type="submit">Guardar</button>
           <button class="btn" type="button" data-accion="comprobar" ${ocupado ? "disabled" : ""}>↻ Comprobar ahora</button>
+          <button class="btn" type="button" data-accion="buscar" ${buscando ? "disabled" : ""}>${buscando ? '<span class="girando">✨</span> Buscando…' : "✨ Buscar tiendas"}</button>
           <button class="btn peligro" type="button" data-accion="borrar">Eliminar</button>
         </div>
       </form>
       <div>
         ${p.enlaces.length ? `
           <table class="tabla">
-            <thead><tr><th>Tienda</th><th>Precio</th><th>Estado</th><th class="col-fecha">Comprobado</th><th></th></tr></thead>
+            <thead><tr><th>Tienda</th><th>Total</th><th class="col-envio">Envío</th><th>Estado</th><th class="col-fecha">Comprobado</th><th></th></tr></thead>
             <tbody>${filas}</tbody>
           </table>` : `<p class="tenue">Este producto aún no tiene enlaces.</p>`}
+        <p class="tenue nota-total">Total = precio + envío a España, en euros. Toca el envío para corregirlo a mano.</p>
+        ${sugerencias(p, buscando)}
         <form class="form-enlace" data-form="enlace">
           <input name="url" placeholder="Pega aquí el enlace de otra tienda…" required>
           <button class="btn" type="submit">Añadir</button>
@@ -382,17 +410,104 @@ function detalle(p) {
     </div>`;
 }
 
+// ---------- Envío ----------
+function textoEnvio(e) {
+  if (e.envio_eur == null) return "envío sin confirmar";
+  return e.envio_eur === 0 ? "envío gratis" : `${dinero(e.envio_eur)} de envío incl.`;
+}
+function celdaEnvio(e) {
+  if (e.envio_eur == null) return `<span class="tenue">¿?</span>`;
+  const valor = e.envio_eur === 0 ? "Gratis" : dinero(e.envio_eur);
+  return e.envio_fuente === "manual" ? `${valor} ✎` : valor;
+}
+function tituloEnvio(e) {
+  const origen = { manual: "escrito por ti", tienda: "publicado por la tienda", IA: "averiguado por la IA" }[e.envio_fuente];
+  const nota = e.envio?.nota ? ` · ${e.envio.nota}` : "";
+  return (e.envio_eur == null ? "Envío desconocido" : `Envío ${origen || ""}${nota}`) + ". Toca para cambiarlo.";
+}
+
+// ---------- Sugerencias de la IA ----------
+function sugerencias(p, buscando) {
+  if (buscando) return `<div class="sugerencias"><p class="tenue"><span class="girando">✨</span> La IA está buscando tiendas y comprobando sus precios (1-3 min)…</p></div>`;
+  const b = busquedas[p.id];
+  if (!b) return "";
+  if (b.error && !(b.candidatos || []).length) return `<div class="sugerencias"><p class="motivo">${esc(b.error)}</p></div>`;
+  const ya = new Set(p.enlaces.map((e) => claveUrl(e.url)));
+  const lista = (b.candidatos || []).filter((c) => !ya.has(claveUrl(c.url)));
+  if (!lista.length) return "";
+  const filas = lista.map((c) => {
+    const v = c.coincide?.veredicto;
+    const chip = v === "no" ? `<span class="chip ko">✗ Otro producto</span>`
+      : v === "variante" ? `<span class="chip duda">⚠ Variante</span>`
+      : c.stock === false ? `<span class="chip gris">Agotado</span>` : "";
+    const envio = c.envio_eur == null ? "envío ¿?" : c.envio_eur === 0 ? "envío gratis" : `+${dinero(c.envio_eur)} envío`;
+    return `
+      <label class="sugerencia">
+        <input type="checkbox" name="sug" value="${esc(c.url)}" ${v === "si" && c.stock !== false ? "checked" : ""}>
+        <span class="min0">
+          <span class="sug-cab"><span class="sug-tienda">${esc(c.tienda)}</span> ${chip}</span>
+          <span class="sug-titulo" title="${esc(c.titulo || "")}">${esc(c.titulo || c.url)}</span>
+          ${c.coincide?.motivo && v !== "si" ? `<span class="tenue">${esc(c.coincide.motivo)}</span>` : ""}
+        </span>
+        <span class="der">
+          <b>${c.total_eur != null ? dinero(c.total_eur) : dinero(c.precio, c.moneda)}</b>
+          <span class="tenue sug-envio">${envio}</span>
+          <a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer" class="tenue">ver ↗</a>
+        </span>
+      </label>`;
+  }).join("");
+  return `
+    <details class="sugerencias" open>
+      <summary>✨ La IA ha encontrado ${lista.length} tienda${lista.length > 1 ? "s" : ""}</summary>
+      <form data-form="sugerencias">
+        ${filas}
+        <div class="botones">
+          <button class="btn primario" type="submit">Añadir las marcadas</button>
+          <button class="btn-texto" type="button" data-accion="descartar">Descartar sugerencias</button>
+        </div>
+      </form>
+    </details>`;
+}
+
+function claveUrl(url) {
+  try {
+    const u = new URL(url);
+    const asin = u.pathname.match(/\/(?:dp|gp\/product|gp\/aw\/d)\/([A-Z0-9]{10})/i);
+    const host = u.hostname.replace(/^www\./, "").toLowerCase();
+    return asin && host.includes("amazon.") ? `${host}/dp/${asin[1].toUpperCase()}` : host + u.pathname.replace(/\/$/, "").toLowerCase();
+  } catch { return url; }
+}
+
+async function cargarBusqueda(id) {
+  try {
+    const b = await leerJSON(RUTA.busqueda(id), null);
+    if (b) busquedas[id] = b; else delete busquedas[id];
+  } catch { /* sin sugerencias */ }
+}
+
 function pintarErrores() {
   const errores = productos.flatMap((p) => p.enlaces.filter((e) => e.error).map((e) => ({ p, e })));
-  $("#num-errores").textContent = errores.length || "";
-  $("#lista-errores").innerHTML = errores.length
-    ? errores.map(({ p, e }) => `
+  // Avisos de la IA: enlaces que quizá no son el mismo producto
+  const dudas = productos.flatMap((p) => p.enlaces
+    .filter((e) => !e.error && (e.veredicto === "no" || e.veredicto === "variante")).map((e) => ({ p, e })));
+  $("#num-errores").textContent = (errores.length + dudas.length) || "";
+  const htmlErrores = errores.map(({ p, e }) => `
         <div class="error-item">
           <div><div class="prod" data-ir="${esc(p.id)}">${esc(p.nombre)}</div><div class="tenue">${esc(e.tienda)} · ${hace(e.ultima_lectura)}</div></div>
           <div><div class="motivo">${esc(e.error)}</div><div class="url">${esc(e.url)}</div></div>
           <a class="btn" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">Abrir ↗</a>
-        </div>`).join("")
-    : `<p class="todo-ok">✓ Todos los enlaces se están leyendo bien.</p>`;
+        </div>`).join("");
+  const htmlDudas = dudas.map(({ p, e }) => `
+        <div class="error-item duda">
+          <div><div class="prod" data-ir="${esc(p.id)}">${esc(p.nombre)}</div><div class="tenue">${esc(e.tienda)}</div></div>
+          <div><div class="motivo">✨ ${e.veredicto === "no" ? "La IA cree que es otro producto (no cuenta para el mejor precio)" : "La IA cree que es otra variante"}: ${esc(e.motivo)}</div>
+            <div class="url">${esc(e.titulo || e.url)}</div></div>
+          <div class="botones">
+            <button class="btn" data-correcto="${esc(p.id)}|${esc(e.id)}" title="Quitar este aviso">Es correcto</button>
+            <a class="btn" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">Abrir ↗</a>
+          </div>
+        </div>`).join("");
+  $("#lista-errores").innerHTML = htmlErrores + htmlDudas || `<p class="todo-ok">✓ Todos los enlaces se están leyendo bien.</p>`;
 }
 
 // ---------- Esperar a que termine la comprobación en GitHub ----------
@@ -404,12 +519,34 @@ async function vigilarComprobacion() {
   try {
     while (comprobando.size) {
       await new Promise((r) => setTimeout(r, 8000));
-      let nuevo;
-      try { nuevo = await leerJSON(RUTA.estado, null); } catch { continue; }
+      let nuevo = null;
+      const busquedasTerminadas = [];
+      try {
+        if ([...comprobando.keys()].some((k) => !k.startsWith("buscar:"))) nuevo = await leerJSON(RUTA.estado, null);
+        for (const [clave, pedido] of comprobando) {
+          if (!clave.startsWith("buscar:")) continue;
+          const id = clave.slice(7);
+          const b = await leerJSON(RUTA.busqueda(id), null);
+          if (b?.fin && new Date(b.inicio).getTime() >= pedido - 60000) {
+            busquedas[id] = b;
+            busquedasTerminadas.push(clave);
+          }
+        }
+      } catch { continue; }
       const inicio = nuevo?.ejecucion?.inicio ? new Date(nuevo.ejecucion.inicio).getTime() : 0;
       let terminado = false;
       for (const [id, pedido] of comprobando) {
-        if (inicio >= pedido - 60000) {   // una ejecución que empezó después de pedirla
+        if (busquedasTerminadas.includes(id)) {
+          comprobando.delete(id);
+          const b = busquedas[id.slice(7)];
+          avisar(b.error && !b.candidatos?.length ? b.error : "✨ Búsqueda terminada: marca las tiendas que quieras añadir");
+          pintar();
+        } else if (id.startsWith("buscar:")) {
+          if (Date.now() - pedido > 10 * 60000) {
+            comprobando.delete(id);
+            avisar("La búsqueda está tardando mucho. Mira la pestaña Actions de tu repositorio.");
+          }
+        } else if (inicio >= pedido - 60000) {   // una ejecución que empezó después de pedirla
           comprobando.delete(id);
           terminado = true;
         } else if (Date.now() - pedido > 10 * 60000) {
@@ -447,9 +584,15 @@ $("#productos").addEventListener("click", (ev) => {
   const id = tarjeta.dataset.id;
 
   if (ev.target.closest(".resumen")) {
-    abiertos.has(id) ? abiertos.delete(id) : abiertos.add(id);
+    if (abiertos.has(id)) abiertos.delete(id);
+    else {
+      abiertos.add(id);
+      cargarBusqueda(id).then(pintar);
+    }
     return pintar();
   }
+  const envio = ev.target.closest("[data-envio]");
+  if (envio) return cambiarEnvio(id, envio.dataset.envio);
   const borrarEnlace = ev.target.closest("[data-borrar-enlace]");
   if (borrarEnlace) {
     if (!confirm("¿Quitar este enlace?")) return;
@@ -461,6 +604,14 @@ $("#productos").addEventListener("click", (ev) => {
   }
   const tipo = ev.target.closest("[data-accion]")?.dataset.accion;
   if (tipo === "comprobar") return accion(() => lanzarComprobacion(id));
+  if (tipo === "buscar") return accion(async () => {
+    await lanzarComprobacion(id, "buscar");
+    avisar("✨ Buscando tiendas con IA (1-3 min)…");
+  });
+  if (tipo === "descartar") {
+    delete busquedas[id];
+    return pintar();
+  }
   if (tipo === "borrar") {
     const p = productos.find((x) => x.id === id);
     if (!confirm(`¿Eliminar "${p.nombre}" y todo su historial?`)) return;
@@ -490,7 +641,16 @@ $("#productos").addEventListener("submit", async (ev) => {
   const boton = form.querySelector("[type=submit]");
   boton.disabled = true;
   try {
-    if (form.dataset.form === "editar") {
+    if (form.dataset.form === "sugerencias") {
+      const urls = new FormData(form).getAll("sug");
+      if (!urls.length) throw new Error("Marca al menos una tienda");
+      await cambiarProductos(`añadir ${urls.length} tiendas sugeridas`, (lista) => {
+        const p = lista.find((x) => x.id === id);
+        if (p) for (const url of urls) p.enlaces.push({ id: nuevoId("e"), url });
+      });
+      await lanzarComprobacion(id);
+      avisar(`${urls.length} tienda(s) añadida(s). Comprobando precios (1-2 min)…`);
+    } else if (form.dataset.form === "editar") {
       const nombre = datos.nombre.trim();
       if (!nombre) throw new Error("El nombre no puede quedar vacío");
       const precio = leerPrecio(datos.precio_deseado);
@@ -519,6 +679,37 @@ document.addEventListener("click", (ev) => {
   const ir = ev.target.closest("[data-ir]");
   if (ir) irA(ir.dataset.ir);
 });
+
+$("#lista-errores").addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-correcto]");
+  if (!b) return;
+  const [pid, eid] = b.dataset.correcto.split("|");
+  accion(async () => {
+    await cambiarProductos("marcar enlace como correcto", (lista) => {
+      const en = lista.find((x) => x.id === pid)?.enlaces.find((e) => e.id === eid);
+      if (en) en.coincide_ok = true;
+    });
+    avisar("Hecho: ese enlace ya cuenta como el mismo producto");
+  });
+});
+
+function cambiarEnvio(pid, eid) {
+  const e = productos.find((x) => x.id === pid)?.enlaces.find((x) => x.id === eid);
+  const actual = e?.envio_fuente === "manual" ? String(e.envio_eur).replace(".", ",") : "";
+  const texto = prompt(
+    "Gastos de envío a España en € para esta tienda (0 = gratis).\nDéjalo vacío para que se calculen solos.", actual);
+  if (texto === null) return;
+  accion(async () => {
+    const valor = texto.trim() === "" ? null : Number(texto.replace(",", ".").replace(/[€\s]/g, ""));
+    if (valor !== null && !(valor >= 0)) throw new Error("El envío debe ser un número (0 = gratis)");
+    await cambiarProductos("cambiar envío", (lista) => {
+      const en = lista.find((x) => x.id === pid)?.enlaces.find((x) => x.id === eid);
+      if (!en) return;
+      if (valor === null) delete en.envio; else en.envio = Math.round(valor * 100) / 100;
+    });
+    avisar(valor === null ? "El envío se calculará solo en la próxima comprobación" : "Envío guardado");
+  });
+}
 
 // ---------- Nuevo producto ----------
 function campoEnlace() {
@@ -560,10 +751,15 @@ $("#form-nuevo").addEventListener("submit", async (ev) => {
     boton.disabled = true;
     await cambiarProductos(`nuevo producto ${nombre}`, (lista) => { lista.unshift(producto); });
     $("#dlg-nuevo").close();
+    abiertos.add(producto.id);
     if (producto.enlaces.length) {
       await lanzarComprobacion(producto.id);
       avisar("Producto creado. Comprobando precios (1-2 min)…");
+    } else {
+      await lanzarComprobacion(producto.id, "buscar");
+      avisar("Producto creado. ✨ La IA está buscando tiendas (1-3 min)…");
     }
+    pintar();
   } catch (e) {
     avisar(e.message);
   } finally {
@@ -629,7 +825,7 @@ async function cambiarPerfil(nuevo) {
   pintarSelectorPerfil();
   abiertos.clear();
   comprobando.clear();
-  productosRaw = []; estado = { enlaces: {} }; historial = {};
+  productosRaw = []; estado = { enlaces: {} }; historial = {}; busquedas = {};
   construir();
   pintar();
   $("#estado").textContent = "Cargando…";

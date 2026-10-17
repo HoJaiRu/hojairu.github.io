@@ -10,7 +10,7 @@
   <title>Vigilante de precios</title>
   <link rel="icon" href="icono.png">
   <link rel="apple-touch-icon" href="icono.png">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
   <header class="cabecera">
@@ -82,19 +82,21 @@
       <label>Precio deseado (€)
         <input name="precio_deseado" inputmode="decimal" required placeholder="Ej: 249,99">
       </label>
-      <div>
-        <span class="etiqueta">Enlaces de tiendas</span>
+      <p class="nota-ia">✨ Pon la marca y el modelo en el nombre y la IA buscará las tiendas por ti
+         (también de fuera de España), con el envío incluido en el precio.</p>
+      <details class="enlaces-manuales">
+        <summary>Prefiero pegar yo los enlaces</summary>
         <div id="nuevo-enlaces" class="lista-inputs"></div>
         <button type="button" id="btn-mas-enlace" class="btn-texto">+ Añadir otro enlace</button>
-      </div>
+      </details>
       <div class="pie">
         <button type="button" class="btn" id="btn-cancelar">Cancelar</button>
-        <button type="submit" class="btn primario">Crear y comprobar</button>
+        <button type="submit" class="btn primario">Crear y buscar</button>
       </div>
     </form>
   </dialog>
 
   <div id="aviso" class="aviso" hidden></div>
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

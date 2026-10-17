@@ -229,3 +229,44 @@ body.perfil-ajeno .selector-perfil select { border-color: #d97706; color: #b4530
   .oferta-item { grid-template-columns: 52px 1fr; }
   .oferta-item .btn.oferta { grid-column: 1 / -1; justify-content: center; }
 }
+
+/* ===== IA: sugerencias, envío y avisos ===== */
+.chip.duda { background: #fff4e0; color: #9a5b00; }
+.chip.ia { background: #efe9ff; color: #5b3cc4; }
+@media (prefers-color-scheme: dark) {
+  .chip.duda { background: #3a2a0c; color: #fbbf24; }
+  .chip.ia { background: #2a2140; color: #c4b5fd; }
+}
+.btn-envio {
+  background: none; border: 1px dashed transparent; color: inherit; font: inherit; font-size: 13px;
+  padding: 2px 6px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+}
+.btn-envio:hover { border-color: var(--borde); }
+.tabla .p .tenue { font-weight: 400; font-size: 12px; margin: 0; }
+.nota-total { margin-top: 8px; }
+.nota-ia { font-size: 13px; color: var(--tenue); margin: 0; }
+.enlaces-manuales summary { font-size: 13px; color: var(--acento); cursor: pointer; }
+.enlaces-manuales[open] summary { margin-bottom: 6px; }
+
+.sugerencias { margin-top: 16px; border: 1px solid var(--borde); border-radius: 12px; padding: 12px 14px; }
+.sugerencias summary { font-weight: 600; cursor: pointer; }
+.sugerencias form { display: grid; gap: 6px; margin-top: 10px; }
+.sugerencia {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
+  padding: 8px; border-radius: 8px; cursor: pointer; font-size: 14px;
+}
+.sugerencia:hover { background: var(--fondo); }
+.sugerencia input { width: auto; }
+.sugerencia .min0 { display: grid; gap: 2px; }
+.sug-cab { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.sug-tienda { font-weight: 600; }
+.sug-titulo { font-size: 12.5px; color: var(--tenue); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sugerencia .der { display: grid; gap: 1px; justify-items: end; white-space: nowrap; }
+.sug-envio, .sugerencia .der a { font-size: 12px; margin: 0; }
+.error-item.duda { border-left-color: #d97706; }
+.error-item.duda .motivo { color: inherit; }
+.error-item .botones { margin: 0; }
+.detalle > * { min-width: 0; }
+@media (max-width: 520px) {
+  .tabla { display: block; overflow-x: auto; }
+}
