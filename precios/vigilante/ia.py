@@ -107,6 +107,11 @@ def _pedir(prompt, herramientas=None, json_puro=False):
             if r.status_code in (429, 500, 503) and intento < 2:
                 time.sleep(20 * (intento + 1))  # cupo por minuto o Gemini saturado
                 continue
+            if r.status_code == 402:      # el proyecto de la clave no tiene saldo: da igual el modelo
+                error = ("Tu clave de Gemini es de un proyecto de pago sin saldo (HTTP 402). "
+                         "Crea la clave en un proyecto sin facturación o añade saldo en AI Studio.")
+                _apuntar(error)
+                raise ErrorIA(error)
             if r.status_code in (401, 403):
                 raise ErrorIA(f"Gemini rechazó la clave (HTTP {r.status_code}): {_mensaje(r)}")
             if r.status_code >= 400:      # 400 = ese modelo no admite algo (p. ej. la búsqueda): probar otro
