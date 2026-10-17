@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://api.github.com; img-src 'self' https: data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#12805c">
+  <title>Vigilante de precios</title>
+  <link rel="icon" href="icono.png">
+  <link rel="apple-touch-icon" href="icono.png">
+  <link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+  <header class="cabecera">
+    <div>
+      <h1>Vigilante de precios</h1>
+      <p id="estado" class="tenue">Cargando…</p>
+    </div>
+    <div class="acciones" id="acciones" hidden>
+      <button id="btn-comprobar-todo" class="btn">↻ Comprobar todo</button>
+      <button id="btn-nuevo" class="btn primario">+ Nuevo producto</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- CONECTAR: solo aparece si este navegador aún no tiene la llave de GitHub -->
+    <section id="conectar" class="conectar" hidden>
+      <h2>Conecta con tu GitHub</h2>
+      <p>Tus productos y precios se guardan en tu repositorio privado. Para verlos y editarlos,
+         pega aquí tu llave de GitHub (token). Solo se guarda en este navegador.</p>
+      <form id="form-conectar" class="fila-conectar">
+        <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…" required>
+        <button class="btn primario" type="submit">Conectar</button>
+      </form>
+      <p id="conectar-error" class="motivo" hidden></p>
+    </section>
+
+    <div id="contenido" hidden>
+      <!-- ZONA DE OFERTAS: solo aparece si hay alguna -->
+      <section id="ofertas" class="zona-ofertas" hidden>
+        <h2>¡Ya están a tu precio!</h2>
+        <div id="lista-ofertas" class="lista-ofertas"></div>
+      </section>
+
+      <!-- PRODUCTOS -->
+      <section>
+        <h2 class="titulo-seccion">Productos vigilados</h2>
+        <div id="productos" class="rejilla"></div>
+        <div id="vacio" class="vacio" hidden>
+          <p>Aún no vigilas ningún producto.</p>
+          <button class="btn primario" id="btn-vacio">+ Añadir el primero</button>
+        </div>
+      </section>
+
+      <!-- ZONA DE ERRORES -->
+      <section class="zona-errores">
+        <h2 class="titulo-seccion">Problemas de lectura <span id="num-errores" class="contador"></span></h2>
+        <div id="lista-errores"></div>
+      </section>
+
+      <footer class="pie-pagina">
+        <button id="btn-desconectar" class="btn-texto">Desconectar este navegador</button>
+      </footer>
+    </div>
+  </main>
+
+  <!-- Ventana para crear producto -->
+  <dialog id="dlg-nuevo">
+    <form id="form-nuevo" class="formulario">
+      <h2>Nuevo producto</h2>
+      <label>Nombre
+        <input name="nombre" required placeholder="Ej: Auriculares Sony WH-1000XM5">
+      </label>
+      <label><span>Descripción <span class="tenue">(opcional)</span></span>
+        <textarea name="descripcion" rows="2" placeholder="Color, talla, notas…"></textarea>
+      </label>
+      <label>Precio deseado (€)
+        <input name="precio_deseado" inputmode="decimal" required placeholder="Ej: 249,99">
+      </label>
+      <div>
+        <span class="etiqueta">Enlaces de tiendas</span>
+        <div id="nuevo-enlaces" class="lista-inputs"></div>
+        <button type="button" id="btn-mas-enlace" class="btn-texto">+ Añadir otro enlace</button>
+      </div>
+      <div class="pie">
+        <button type="button" class="btn" id="btn-cancelar">Cancelar</button>
+        <button type="submit" class="btn primario">Crear y comprobar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="aviso" class="aviso" hidden></div>
+  <script src="app.js?v=3"></script>
+</body>
+</html>
