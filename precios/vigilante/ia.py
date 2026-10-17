@@ -211,6 +211,37 @@ Responde SOLO con este JSON:
     return candidatos
 
 
+def elegir_resultados(nombre, descripcion, resultados):
+    """Plan B sin búsqueda de Google: la IA elige, de los resultados de un buscador normal,
+    cuáles son fichas de tiendas que venden el producto. No inventa enlaces: solo elige."""
+    lista = "\n".join(f'- n={i} | {r["url"]} | {r["titulo"][:120]} | {r["extracto"][:160]}'
+                      for i, r in enumerate(resultados))
+    prompt = f"""Un usuario quiere comprar este producto NUEVO con envío a España:
+Producto: {nombre}
+Detalles: {descripcion or "(ninguno)"}
+
+Estos son resultados de un buscador. Elige SOLO los que sean la ficha de ese producto en una tienda online
+(España u otro país que envíe a España). Descarta búsquedas, categorías, comparadores, foros, reseñas,
+noticias, vídeos, segunda mano y accesorios. Como máximo 10, primero las tiendas más conocidas.
+Para cada una, si lo sabes, añade sus condiciones de envío.
+{REGLAS_ENVIO}
+
+{lista}
+
+Responde SOLO con JSON: {{"elegidos": [{{"n": 0, "tienda": "...", "pais": "ES", "envio_coste": null, "envio_gratis_desde": null, "envio_moneda": "EUR", "envio_nota": null}}]}}"""
+    texto, _ = _pedir(prompt, json_puro=True)
+    d = _json(texto)
+    filas = d.get("elegidos", []) if isinstance(d, dict) else d
+    candidatos = []
+    for f in filas if isinstance(filas, list) else []:
+        try:
+            r = resultados[int(f["n"])]
+        except (KeyError, ValueError, TypeError, IndexError):
+            continue
+        candidatos.append({"url": r["url"], "tienda": f.get("tienda"), "pais": f.get("pais"), "envio": _envio(f)})
+    return candidatos
+
+
 # ---------- 2. ¿Es el mismo producto? ----------
 def revisar_enlaces(nombre, descripcion, enlaces):
     """enlaces: [{"id", "tienda", "titulo", "precio", "moneda"}] -> {id: {"veredicto", "motivo"}}"""

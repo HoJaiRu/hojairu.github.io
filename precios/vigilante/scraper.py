@@ -9,7 +9,8 @@ Orden de busqueda (se queda con lo primero que encuentre):
 import json
 import re
 import time
-from urllib.parse import urlparse
+import base64
+from urllib.parse import parse_qs, quote_plus, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -400,3 +401,58 @@ def resolver_redireccion(url):
         return destino if destino and destino.startswith("http") else None
     except Exception:
         return None
+
+
+# Webs que nunca son tiendas: no hace falta ni enseñárselas a la IA
+NO_TIENDAS = ("youtube.", "reddit.", "wikipedia.", "facebook.", "instagram.", "tiktok.", "x.com",
+              "twitter.", "pinterest.", "forocoches.", "xataka.", "duckduckgo.", "bing.", "google.")
+
+
+def _resultados_duckduckgo(consulta):
+    html = descargar(f"https://html.duckduckgo.com/html/?q={quote_plus(consulta)}&kl=es-es")
+    soup = BeautifulSoup(html, "html.parser")
+    res = []
+    for a in soup.select("a.result__a"):
+        href = a.get("href", "")
+        if "uddg=" in href:
+            href = parse_qs(urlparse(href).query).get("uddg", [""])[0]
+        caja = a.find_parent(class_="result")
+        extracto = caja.select_one(".result__snippet") if caja else None
+        res.append({"url": href, "titulo": a.get_text(" ", strip=True),
+                    "extracto": extracto.get_text(" ", strip=True) if extracto else ""})
+    return res
+
+
+def _resultados_bing(consulta):
+    html = descargar(f"https://www.bing.com/search?q={quote_plus(consulta)}&cc=ES&setlang=es&count=20")
+    soup = BeautifulSoup(html, "html.parser")
+    res = []
+    for li in soup.select("li.b_algo"):
+        a = li.select_one("h2 a")
+        if not a:
+            continue
+        href = a.get("href", "")
+        if "bing.com/ck/a" in href:          # enlace de rastreo: la dirección real va en u=a1<base64>
+            u = parse_qs(urlparse(href).query).get("u", [""])[0]
+            try:
+                href = base64.urlsafe_b64decode(u[2:] + "=" * (-len(u[2:]) % 4)).decode()
+            except Exception:
+                continue
+        extracto = li.select_one("p")
+        res.append({"url": href, "titulo": a.get_text(" ", strip=True),
+                    "extracto": extracto.get_text(" ", strip=True) if extracto else ""})
+    return res
+
+
+def buscar_en_web(consulta):
+    """Busca en DuckDuckGo (y si falla, en Bing). Devuelve [{url, titulo, extracto}]."""
+    for buscador in (_resultados_duckduckgo, _resultados_bing):
+        try:
+            res = [r for r in buscador(consulta) if r["url"].startswith("http")
+                   and not any(n in (urlparse(r["url"]).hostname or "") for n in NO_TIENDAS)]
+        except ErrorLectura as e:
+            print(f"  ({buscador.__name__[12:]}: {e})")
+            continue
+        if res:
+            return res
+    return []

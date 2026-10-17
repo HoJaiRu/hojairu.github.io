@@ -295,6 +295,21 @@ def limpiar_url(url):
     return urlunparse(p._replace(query=query, fragment=""))
 
 
+def buscar_plan_b(producto):
+    nombre = producto["nombre"]
+    resultados, vistos = [], set()
+    for consulta in (f"{nombre} comprar", f"{nombre} precio tienda"):
+        for r in scraper.buscar_en_web(consulta):
+            if clave_url(r["url"]) not in vistos:
+                vistos.add(clave_url(r["url"]))
+                resultados.append(r)
+        time.sleep(2)
+    print(f"  El buscador devuelve {len(resultados)} resultados")
+    if not resultados:
+        raise ia.ErrorIA("el buscador web no ha devuelto resultados")
+    return ia.elegir_resultados(nombre, producto.get("descripcion", ""), resultados[:30])
+
+
 def buscar(producto):
     """Busca tiendas para el producto y devuelve el resultado (se guarda en datos/busquedas/)."""
     registro = {"inicio": iso(ahora()), "fin": None, "error": None, "candidatos": [], "descartados": 0}
@@ -306,8 +321,13 @@ def buscar(producto):
     try:
         encontrados = ia.buscar_tiendas(producto["nombre"], producto.get("descripcion", ""))
     except ia.ErrorIA as e:
-        registro.update(error=f"La IA no pudo buscar: {e}", fin=iso(ahora()), problemas=ia.diagnostico)
-        return registro
+        # Plan B: buscador normal (DuckDuckGo/Bing) y la IA elige las fichas de tienda
+        print(f"  La búsqueda de Google con IA no está disponible ({str(e)[:120]}); uso el buscador normal")
+        try:
+            encontrados = buscar_plan_b(producto)
+        except ia.ErrorIA as e2:
+            registro.update(error=f"La IA no pudo buscar: {e2}", fin=iso(ahora()), problemas=ia.diagnostico)
+            return registro
 
     ya = {clave_url(en["url"]) for en in producto.get("enlaces", [])}
     hosts_ya = set()
