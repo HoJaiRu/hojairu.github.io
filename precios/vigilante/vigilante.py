@@ -75,17 +75,6 @@ def hoy():
     return iso(ahora())[:10]
 
 
-def uso_ia_hoy(estado):
-    """Consultas a la IA de hoy en este perfil: comprobaciones (estado) + búsquedas (un archivo cada una)."""
-    total = estado.get("ia", {}).get("hoy", {}).get("consultas", 0) if estado.get("ia", {}).get("hoy", {}).get("fecha") == hoy() else 0
-    if BUSQUEDAS.exists():
-        for archivo in BUSQUEDAS.glob("*.json"):
-            u = leer(archivo, {}).get("uso_ia") or {}
-            if u.get("fecha") == hoy():
-                total += u.get("consultas", 0)
-    return total
-
-
 def anotar_uso_ia(estado):
     """Guarda en estado.json lo que ha gastado la IA hoy y este mes (para vigilar el saldo)."""
     previo = estado.get("ia", {})
@@ -96,7 +85,7 @@ def anotar_uso_ia(estado):
     mes["consultas"] += ia.llamadas()
     mes["tokens"] += ia.uso["tokens"]
     mes["busquedas_google"] += ia.uso["busquedas_google"]
-    estado["ia"] = {"activa": ia.activa(), "limite_diario": ia.LIMITE_DIARIO, "hoy": dia, "mes": mes,
+    estado["ia"] = {"activa": ia.activa(), "max_por_consulta": ia.MAX_LLAMADAS, "hoy": dia, "mes": mes,
                     "problemas": ia.diagnostico}
 
 
@@ -240,7 +229,9 @@ def revisar_con_ia(productos, estado, solo):
                       if not en.get("coincide_ok") and (e.get("coincide") or {}).get("titulo") != e.get("titulo")]
         if pendientes:
             try:
-                res = ia.revisar_enlaces(p["nombre"], p.get("descripcion", ""), [
+                interp = leer(BUSQUEDAS / f"{p['id']}.json", {}).get("interpretado") or {}
+                res = ia.revisar_enlaces(interp.get("producto") or p["nombre"],
+                                         " · ".join(x for x in (p.get("descripcion", ""), interp.get("claves")) if x), [
                     {"id": en["id"], "tienda": e.get("tienda"), "titulo": e.get("titulo"),
                      "precio": e.get("precio"), "moneda": e.get("moneda")} for en, e in leidos])
                 for en, e in pendientes:
@@ -342,8 +333,7 @@ def limpiar_url(url):
     return urlunparse(p._replace(query=query, fragment=""))
 
 
-def buscar_plan_b(producto):
-    nombre = producto["nombre"]
+def buscar_plan_b(nombre, detalles):
     resultados, vistos = [], set()
     for consulta in (f"{nombre} comprar", f"{nombre} precio tienda"):
         for r in scraper.buscar_en_web(consulta):
@@ -354,7 +344,7 @@ def buscar_plan_b(producto):
     print(f"  El buscador devuelve {len(resultados)} resultados")
     if not resultados:
         raise ia.ErrorIA("el buscador web no ha devuelto resultados")
-    return ia.elegir_resultados(nombre, producto.get("descripcion", ""), resultados[:30])
+    return ia.elegir_resultados(nombre, detalles, resultados[:30])
 
 
 def buscar(producto):
@@ -364,34 +354,57 @@ def buscar(producto):
         registro.update(error="La búsqueda con IA aún no está activada (falta la clave de Gemini).",
                         fin=iso(ahora()), uso_ia={"fecha": hoy(), "consultas": 0})
         return registro
-    print(f"Buscando tiendas para «{producto['nombre']}»...")
+    # 1. Entender lo que ha escrito el usuario ("diesel only the brave" -> producto exacto)
+    nombre, detalles = producto["nombre"], producto.get("descripcion", "")
     try:
-        encontrados = ia.buscar_tiendas(producto["nombre"], producto.get("descripcion", ""))
+        interpretado = ia.interpretar(nombre, detalles)
+        registro["interpretado"] = interpretado
+        nombre = interpretado["producto"] or nombre
+        detalles = " · ".join(x for x in (detalles, interpretado["claves"]) if x)
+        consulta = interpretado["consulta"] or nombre
     except ia.ErrorIA as e:
-        # Plan B: buscador normal (DuckDuckGo/Bing) y la IA elige las fichas de tienda
-        print(f"  La búsqueda de Google con IA no está disponible ({str(e)[:120]}); uso el buscador normal")
-        try:
-            encontrados = buscar_plan_b(producto)
-        except ia.ErrorIA as e2:
-            registro.update(error=f"La IA no pudo buscar: {e2}", fin=iso(ahora()), problemas=ia.diagnostico,
-                            uso_ia={"fecha": hoy(), "consultas": ia.llamadas()})
-            return registro
+        print(f"  (no se pudo interpretar el nombre: {e})")
+        consulta = nombre
+    print(f"Buscando tiendas para «{nombre}» (consulta: {consulta})...")
 
+    # 2. Búsqueda de Google con la IA y, si encuentra poco, también el buscador normal
     ya = {clave_url(en["url"]) for en in producto.get("enlaces", [])}
-    hosts_ya = set()
-    candidatos = []
-    for c in encontrados:
-        url = c["url"]
-        if c.get("redireccion") or "vertexaisearch" in url:
-            url = scraper.resolver_redireccion(url)
-            if not url:
+    hosts_ya, candidatos = set(), []
+    traza = registro["traza"] = {}
+
+    def anadir(encontrados):
+        for c in encontrados:
+            url = c["url"]
+            if c.get("redireccion") or "vertexaisearch" in url:
+                url = scraper.resolver_redireccion(url)
+                if not url:
+                    continue
+            url = limpiar_url(url)
+            host = (urlparse(url).hostname or "").lower().removeprefix("www.")
+            if clave_url(url) in ya or host in hosts_ya or len(urlparse(url).path) < 3:
                 continue
-        url = limpiar_url(url)
-        host = (urlparse(url).hostname or "").lower().removeprefix("www.")
-        if clave_url(url) in ya or host in hosts_ya or len(urlparse(url).path) < 3:
-            continue
-        hosts_ya.add(host)          # una ficha por tienda
-        candidatos.append({**c, "url": url})
+            hosts_ya.add(host)          # una ficha por tienda
+            candidatos.append({**c, "url": url})
+
+    try:
+        encontrados = ia.buscar_tiendas(consulta, detalles)
+        traza["google"] = len(encontrados)
+        anadir(encontrados)
+    except ia.ErrorIA as e:
+        traza["google"] = f"error: {str(e)[:150]}"
+    if len(candidatos) < 4:
+        print(f"  Solo {len(candidatos)} tiendas con Google; pruebo también el buscador normal")
+        traza["respuesta_google"] = ia.ultima_respuesta[:300]
+        try:
+            encontrados = buscar_plan_b(consulta, detalles)
+            traza["buscador"] = len(encontrados)
+            anadir(encontrados)
+        except ia.ErrorIA as e:
+            traza["buscador"] = f"error: {str(e)[:150]}"
+    if not candidatos and isinstance(traza.get("google"), str) and isinstance(traza.get("buscador"), str):
+        registro.update(error=f"La IA no pudo buscar: {traza['google'][7:]}", fin=iso(ahora()),
+                        problemas=ia.diagnostico, uso_ia={"fecha": hoy(), "consultas": ia.llamadas()})
+        return registro
     candidatos = candidatos[:MAX_CANDIDATOS]
     print(f"  La IA propone {len(candidatos)} tiendas; compruebo cada una")
 
@@ -424,7 +437,7 @@ def buscar(producto):
 
     if verificados:
         try:
-            revision = ia.revisar_enlaces(producto["nombre"], producto.get("descripcion", ""), verificados)
+            revision = ia.revisar_enlaces(nombre, detalles, verificados)
             for c in verificados:
                 if c["id"] in revision:
                     c["coincide"] = {**revision[c["id"]], "titulo": c.get("titulo")}
@@ -477,7 +490,6 @@ def main():
     estado.setdefault("enlaces", {})
     historial = leer(HISTORIAL, {})
     cargar_tasas(estado)
-    ia.fijar_cupo(uso_ia_hoy(estado))
     print(f"IA (Gemini): {'activada' if ia.activa() else 'desactivada (falta GEMINI_API_KEY)'}")
 
     if args.accion == "buscar":

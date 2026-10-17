@@ -8,6 +8,7 @@ Los precios los lee el lector (scraper.py). La IA solo lee un precio como ÚLTIM
 lector falla, y ese fallo se sigue mostrando en la zona de errores de la web.
 
 Funciones:
+  interpretar()      Entiende el nombre que escribes (aunque esté incompleto) y prepara la búsqueda
   buscar_tiendas()   Busca en Google dónde comprar un producto (con envío a España)
   revisar_enlaces()  Clasifica cada enlace: mismo producto, otra variante u otro producto
   consultar_envio()  Averigua los gastos de envío a España de cada tienda
@@ -22,16 +23,15 @@ import requests
 
 BASE = "https://generativelanguage.googleapis.com/v1beta"
 API = BASE + "/models/{modelo}:generateContent"
-MAX_LLAMADAS = 25          # por ejecución
-# Tope diario por perfil (todas las ejecuciones del día juntas). Con ~5 € de saldo al mes y dos
-# perfiles, este tope garantiza que no se gaste todo de golpe aunque algo falle en bucle.
-LIMITE_DIARIO = int(os.environ.get("GEMINI_LIMITE_DIARIO", "40"))
+# Tope por consulta (cada búsqueda o comprobación): si algo sale mal y entra en bucle, como mucho
+# gasta esto. No hay tope diario: puedes buscar todos los productos que quieras.
+MAX_LLAMADAS = int(os.environ.get("GEMINI_MAX_POR_CONSULTA", "15"))
 
 _llamadas = 0
-_cupo = MAX_LLAMADAS       # lo que queda hoy, como mucho MAX_LLAMADAS (ver fijar_cupo)
 uso = {"tokens": 0, "busquedas_google": 0}   # para saber cuánto se gasta de verdad
 _modelo_ok = None
 _modelos = None
+ultima_respuesta = ""      # lo último que dijo la búsqueda (para entender por qué no encuentra nada)
 diagnostico = []           # problemas con la IA en esta ejecución (se guardan en estado.json)
 
 
@@ -76,20 +76,14 @@ def llamadas():
     return _llamadas
 
 
-def fijar_cupo(usadas_hoy):
-    """Cuántas consultas quedan en esta ejecución según lo ya gastado hoy por este perfil."""
-    global _cupo
-    _cupo = max(0, min(MAX_LLAMADAS, LIMITE_DIARIO - usadas_hoy))
-
-
 # ---------- Llamada a Gemini ----------
 def _pedir(prompt, herramientas=None, json_puro=False):
     """Devuelve (texto, metadatos de búsqueda)."""
     global _llamadas, _modelo_ok
     if not activa():
         raise ErrorIA("Falta la clave de Gemini (secreto GEMINI_API_KEY)")
-    if _llamadas >= _cupo:
-        raise ErrorIA(f"Tope de consultas a la IA alcanzado (máximo {LIMITE_DIARIO} al día por perfil)")
+    if _llamadas >= MAX_LLAMADAS:
+        raise ErrorIA(f"Tope de {MAX_LLAMADAS} consultas a la IA en esta ejecución alcanzado")
     cuerpo = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
               "generationConfig": {"temperature": 0.2}}
     if herramientas:
@@ -200,6 +194,26 @@ REGLAS_ENVIO = """Para el envío a España (península), indica:
 - "envio_nota": nota muy breve si hace falta (p. ej. "gratis con Prime", "posibles aduanas", "solo recogida en tienda")."""
 
 
+# ---------- 0. Entender lo que ha escrito el usuario ----------
+def interpretar(nombre, descripcion=""):
+    """Convierte "diesel only the brave" en el producto exacto y una buena consulta de búsqueda."""
+    prompt = f"""Un usuario ha escrito así un producto que quiere comprar (puede tener faltas, estar incompleto o en minúsculas):
+Nombre: {nombre}
+Detalles: {descripcion or "(ninguno)"}
+
+Identifica el producto más probable y responde SOLO con JSON:
+{{"producto": "nombre completo y bien escrito (marca + modelo + variante/tamaño si se deduce)",
+  "consulta": "texto corto ideal para buscarlo en tiendas online españolas",
+  "resumen": "una frase en español que describa el producto",
+  "claves": "detalles que distinguen la versión correcta de otras parecidas (p. ej. Eau de Toilette vs Parfum, capacidad, color) o vacío"}}
+No inventes un tamaño o color si el usuario no lo dice: en ese caso no lo pongas."""
+    texto, _ = _pedir(prompt, json_puro=True)
+    d = _json(texto)
+    if not isinstance(d, dict) or not d.get("consulta"):
+        raise ErrorIA("La IA no ha entendido el producto")
+    return {k: str(d.get(k) or "")[:200] for k in ("producto", "consulta", "resumen", "claves")}
+
+
 # ---------- 1. Buscar tiendas ----------
 def buscar_tiendas(nombre, descripcion=""):
     """Busca en Google dónde comprar el producto. Devuelve una lista de candidatos (sin verificar)."""
@@ -210,13 +224,16 @@ Detalles: {descripcion or "(ninguno)"}
 
 - Incluye tiendas de España y también de otros países si envían a España (Amazon, la tienda oficial de la marca, grandes cadenas, tiendas especializadas...).
 - Quiero la URL DIRECTA de la ficha del producto en cada tienda, no búsquedas, categorías, comparadores, foros, reseñas, vídeos ni segunda mano.
-- Si no estás seguro de la URL exacta de la ficha, no te la inventes: omite esa tienda.
-- Como máximo 10 tiendas, primero las más conocidas y fiables.
+- Da la mejor URL que encuentres de cada tienda para este producto: luego comprobamos cada enlace nosotros,
+  así que es mejor dar una URL dudosa que no dar ninguna. Busca varias veces si hace falta.
+- Entre 5 y 12 tiendas, primero las más conocidas y fiables. Acepta tamaños o formatos parecidos si no se especifican.
 {REGLAS_ENVIO}
 
 Responde SOLO con este JSON:
 {{"resultados": [{{"url": "...", "tienda": "...", "pais": "ES", "envio_coste": null, "envio_gratis_desde": null, "envio_moneda": "EUR", "envio_nota": null}}]}}"""
     texto, meta = _pedir(prompt, herramientas=["google_search"])
+    global ultima_respuesta
+    ultima_respuesta = texto[:600]
     try:
         resultados = _json(texto)
         resultados = resultados.get("resultados", []) if isinstance(resultados, dict) else resultados

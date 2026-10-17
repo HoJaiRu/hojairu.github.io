@@ -9,6 +9,7 @@ Orden de busqueda (se queda con lo primero que encuentre):
 import json
 import re
 import time
+import atexit
 import base64
 from urllib.parse import parse_qs, quote_plus, urlparse
 
@@ -413,7 +414,61 @@ def _comprobar_normal(url):
                 raise
         except Exception:      # esta versión de curl_cffi no conoce esa imitación
             continue
+    # Último intento del lector: abrir la página en un Chrome de verdad (pasa muchas comprobaciones anti-bots)
+    try:
+        return analizar(descargar_navegador(url), url)
+    except ErrorLectura as e:
+        if e.tipo != "bloqueo":
+            raise
     raise primero
+
+
+# ---------- Navegador de verdad (Chrome sin ventana) ----------
+_navegador = None
+
+
+def descargar_navegador(url, espera=25):
+    """Abre la página con Chrome (ya instalado en los servidores de GitHub) y devuelve el HTML final.
+    Es lento (unos segundos por página), por eso solo se usa cuando la tienda bloquea lo demás."""
+    global _navegador
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise ErrorLectura("La tienda bloquea la lectura automática (navegador no disponible)", "bloqueo")
+    try:
+        if _navegador is None:
+            pw = sync_playwright().start()
+            try:
+                _navegador = pw.chromium.launch(channel="chrome", headless=True,
+                                                args=["--disable-blink-features=AutomationControlled"])
+            except Exception:
+                _navegador = pw.chromium.launch(headless=True,
+                                                args=["--disable-blink-features=AutomationControlled"])
+            atexit.register(_navegador.close)
+        contexto = _navegador.new_context(locale="es-ES", timezone_id="Europe/Madrid",
+                                          viewport={"width": 1366, "height": 900})
+        pagina = contexto.new_page()
+        pagina.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        try:
+            pagina.goto(url, wait_until="domcontentloaded", timeout=espera * 1000)
+            # Si sale la pantalla de "comprobando que eres humano", esperar a que se resuelva sola
+            for _ in range(espera // 3):
+                html = pagina.content()
+                bajo = html[:200000].lower()
+                if not any(m in bajo for m in MARCAS_BLOQUEO) and ("ld+json" in bajo or "price" in bajo):
+                    break
+                pagina.wait_for_timeout(3000)
+            try:
+                pagina.wait_for_load_state("networkidle", timeout=5000)
+            except Exception:
+                pass
+            return pagina.content()
+        finally:
+            contexto.close()
+    except ErrorLectura:
+        raise
+    except Exception as e:
+        raise ErrorLectura(f"La tienda bloquea la lectura automática (navegador: {type(e).__name__})", "bloqueo")
 
 
 # ---------- Ayudas para la IA ----------
