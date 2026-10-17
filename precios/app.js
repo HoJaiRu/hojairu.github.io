@@ -431,7 +431,10 @@ function sugerencias(p, buscando) {
   if (buscando) return `<div class="sugerencias"><p class="tenue"><span class="girando">✨</span> La IA está buscando tiendas y comprobando sus precios (1-3 min)…</p></div>`;
   const b = busquedas[p.id];
   if (!b) return "";
-  if (b.error && !(b.candidatos || []).length) return `<div class="sugerencias"><p class="motivo">${esc(b.error)}</p></div>`;
+  // Lo que ha entendido la IA del nombre escrito (para que se vea qué ha buscado)
+  const entendido = b.interpretado?.producto
+    ? `<p class="tenue entendido">✨ Buscado como <b>${esc(b.interpretado.producto)}</b>${b.interpretado.resumen ? ` · ${esc(b.interpretado.resumen)}` : ""}</p>` : "";
+  if (b.error && !(b.candidatos || []).length) return `<div class="sugerencias">${entendido}<p class="motivo">${esc(b.error)}</p></div>`;
   const ya = new Set(p.enlaces.map((e) => claveUrl(e.url)));
   const lista = (b.candidatos || []).filter((c) => !ya.has(claveUrl(c.url)));
   if (!lista.length) return "";
@@ -461,6 +464,7 @@ function sugerencias(p, buscando) {
     <details class="sugerencias" open>
       <summary>✨ La IA ha encontrado ${lista.length} tienda${lista.length > 1 ? "s" : ""}</summary>
       <form data-form="sugerencias">
+        ${entendido}
         ${filas}
         <div class="botones">
           <button class="btn primario" type="submit">Añadir las marcadas</button>
