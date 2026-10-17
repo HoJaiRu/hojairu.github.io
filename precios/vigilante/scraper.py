@@ -26,12 +26,10 @@ class ErrorLectura(Exception):
     """Error 'esperado' al leer una tienda. El texto se muestra en la zona de errores.
 
     tipo: "conexion", "404", "bloqueo", "http" o "sin_precio".
-    html: la página descargada (si se llegó a descargar), para que la IA pueda leerla.
     """
-    def __init__(self, mensaje, tipo="otro", html=None):
+    def __init__(self, mensaje, tipo="otro"):
         super().__init__(mensaje)
         self.tipo = tipo
-        self.html = html
 
 
 CABECERAS = {"Accept-Language": "es-ES,es;q=0.9,en;q=0.8"}
@@ -361,9 +359,9 @@ def analizar(html, url):
     if not datos.get("precio") and datos.get("stock") is not False:
         texto = html[:200000].lower()
         if any(m in texto for m in MARCAS_BLOQUEO):
-            raise ErrorLectura("La tienda ha mostrado un captcha o bloqueo anti-bots", "bloqueo", html)
+            raise ErrorLectura("La tienda ha mostrado un captcha o bloqueo anti-bots", "bloqueo")
         raise ErrorLectura("No encuentro el precio en la página (puede que la tienda lo cargue con JavaScript)",
-                           "sin_precio", html)
+                           "sin_precio")
 
     imagen = datos.get("imagen")
     if imagen and imagen.startswith("//"):
@@ -392,20 +390,7 @@ def comprobar(url):
         return analizar(descargar(movil, imitar="safari_ios"), movil)
 
 
-# ---------- Ayudas para la IA ----------
-def texto_para_ia(html, maximo=25000):
-    """Texto visible de la página (sin menús ni scripts), recortado para mandarlo a la IA."""
-    soup = BeautifulSoup(html, "html.parser")
-    extra = []
-    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
-        extra.append((tag.string or tag.get_text() or "")[:3000])
-    for tag in soup(["script", "style", "noscript", "svg", "nav", "footer", "iframe"]):
-        tag.decompose()
-    titulo = soup.title.get_text(strip=True) if soup.title else ""
-    texto = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
-    return (f"TÍTULO: {titulo}\n{texto}\n\nDATOS ESTRUCTURADOS:\n" + "\n".join(extra))[:maximo]
-
-
+# ---------- Ayuda para la búsqueda con IA ----------
 def resolver_redireccion(url):
     """Los enlaces que cita Google pasan por una redirección: devuelve la dirección final."""
     try:

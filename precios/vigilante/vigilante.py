@@ -10,10 +10,10 @@ Escribe: datos/estado.json      (último precio, envío, stock y error de cada e
          datos/busquedas/<producto>.json  (tiendas que ha encontrado la IA para ese producto)
 Avisa:   notificación al móvil con ntfy si un producto llega a tu precio
 
-Con el secreto GEMINI_API_KEY, además usa la IA (ver ia.py) para:
+Con el secreto GEMINI_API_KEY, además usa la IA (ver ia.py) SOLO para:
   - buscar tiendas a partir del nombre del producto (--accion buscar)
-  - leer las páginas en las que el lector normal no encuentra el precio
-  - averiguar los gastos de envío y comprobar que cada enlace es el mismo producto
+  - clasificar cada enlace (¿es el mismo producto?) y averiguar los gastos de envío
+Los precios los lee siempre el lector (scraper.py); la IA nunca lee ni corrige precios.
 """
 import argparse
 import json
@@ -38,7 +38,6 @@ DIAS_HISTORIAL = 365           # se borra lo más antiguo
 NUEVO_PUNTO_CADA_HORAS = 20    # aunque el precio no cambie, guarda un punto al día
 DIAS_ENVIO_IA = 7              # cada cuánto se vuelven a consultar los gastos de envío
 MAX_CANDIDATOS = 10            # tiendas que se comprueban en cada búsqueda
-MAX_RESCATES_BUSQUEDA = 4      # páginas que la IA lee en cada búsqueda si el lector no puede
 
 
 def ahora():
@@ -121,35 +120,21 @@ def calcular_totales(e, enlace):
 
 
 # ---------- Comprobar ----------
-def leer_enlace(url, permitir_ia=True):
-    """Lee un enlace con el lector normal y, si no puede, con la IA. Devuelve (datos, fuente)."""
-    try:
-        return scraper.comprobar(url), "lector"
-    except scraper.ErrorLectura as e:
-        if not (permitir_ia and ia.activa() and e.tipo in ("sin_precio", "bloqueo", "http")):
-            raise
-        try:
-            texto = scraper.texto_para_ia(e.html) if e.html else None
-            return ia.leer_pagina(url, texto), "IA"
-        except ia.ErrorIA as e_ia:
-            print(f"    (IA: {e_ia})")
-            raise e
-
-
 def comprobar_enlace(url, anterior):
     """Devuelve el nuevo estado del enlace (conserva el último precio si falla)."""
     nuevo = dict(anterior)
     nuevo["tienda"] = scraper.nombre_tienda(url)
     nuevo["ultima_lectura"] = iso(ahora())
     try:
-        d, fuente = leer_enlace(url)
+        d = scraper.comprobar(url)
     except scraper.ErrorLectura as e:
         nuevo["error"] = str(e)
     except Exception as e:  # fallo imprevisto: también a la zona de errores
         nuevo["error"] = f"Error inesperado: {type(e).__name__}: {e}"[:300]
     else:
         nuevo.update(precio=d["precio"], moneda=d["moneda"], stock=d["stock"], error=None,
-                     ultimo_ok=nuevo["ultima_lectura"], fuente=fuente)
+                     ultimo_ok=nuevo["ultima_lectura"])
+        nuevo.pop("fuente", None)
         if d.get("imagen"):
             nuevo["imagen"] = d["imagen"]
         if d.get("titulo"):
@@ -342,15 +327,13 @@ def buscar(producto):
     candidatos = candidatos[:MAX_CANDIDATOS]
     print(f"  La IA propone {len(candidatos)} tiendas; compruebo cada una")
 
-    verificados, rescates = [], 0
+    verificados = []
     for i, c in enumerate(candidatos):
         if i:
             time.sleep(random.uniform(1, 3))
         try:
-            d, fuente = leer_enlace(c["url"], permitir_ia=rescates < MAX_RESCATES_BUSQUEDA)
+            d = scraper.comprobar(c["url"])     # el precio lo lee siempre el lector, nunca la IA
         except scraper.ErrorLectura as e:
-            if e.tipo in ("sin_precio", "bloqueo", "http"):
-                rescates += 1
             print(f"  ✗ {c['url'][:80]}: {e}")
             registro["descartados"] += 1
             continue
@@ -358,13 +341,11 @@ def buscar(producto):
             print(f"  ✗ {c['url'][:80]}: {type(e).__name__}")
             registro["descartados"] += 1
             continue
-        if fuente == "IA":
-            rescates += 1
         envio = d.get("envio") or c.get("envio")
         cand = {"id": f"c{i}", "url": c["url"], "tienda": scraper.nombre_tienda(c["url"]),
                 "pais": c.get("pais"), "titulo": d.get("titulo"), "imagen": d.get("imagen"),
                 "precio": d["precio"], "moneda": d["moneda"], "stock": d.get("stock"),
-                "fuente": fuente, "envio": envio}
+                "envio": envio}
         calcular_totales(cand, {})
         verificados.append(cand)
         print(f"  ✓ {cand['tienda']}: {cand['precio']} {cand['moneda']}")
@@ -447,8 +428,7 @@ def main():
         calcular_totales(e, enlace)
         estado["enlaces"][enlace["id"]] = e
         resultado = f"ERROR: {e['error']}" if e.get("error") else (
-            "agotado" if e.get("stock") is False else f"{e['precio']} {e['moneda']}"
-            + (" (leído con IA)" if e.get("fuente") == "IA" else ""))
+            "agotado" if e.get("stock") is False else f"{e['precio']} {e['moneda']}")
         print(f"  [{e['tienda']}] {p['nombre']}: {resultado}")
 
     revisar_con_ia(objetivo, estado, solo)

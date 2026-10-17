@@ -366,7 +366,6 @@ function detalle(p) {
     else if (e.veredicto === "variante") est = `<span class="chip duda" title="${esc(e.motivo)}">⚠ Variante</span>`;
     else if (e.ultima_lectura) est = `<span class="chip ok">✓ OK</span>`;
     else est = `<span class="chip gris">Pendiente</span>`;
-    if (e.fuente === "IA" && !e.error) est += ` <span class="chip ia" title="El lector no entendía esta página y el precio lo ha leído la IA">✨ IA</span>`;
     const precioOriginal = e.precio != null && e.moneda !== "EUR"
       ? `<div class="tenue">${dinero(e.precio, e.moneda)}</div>` : "";
     return `

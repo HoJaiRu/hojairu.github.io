@@ -43,9 +43,9 @@ crear la misma carpeta en el repositorio privado `WEBS`.
 Repositorios de datos (privados): `WEBS` (HoJaiRu) y `precios-perfil2`.
 Cada uno tiene `precios/productos.json`, `precios/datos/` y un workflow pequeño que llama al de aquí.
 
-**IA (Gemini):** `precios/vigilante/ia.py`. Busca tiendas a partir del nombre del producto, lee las páginas
-que el lector normal no entiende, averigua los gastos de envío a España y avisa si un enlace no es el mismo
-producto. Necesita el secreto `GEMINI_API_KEY` en cada repositorio de datos; sin él todo funciona igual, pero sin IA.
+**IA (Gemini):** `precios/vigilante/ia.py`. Solo busca tiendas a partir del nombre del producto, averigua los
+gastos de envío a España y clasifica si cada enlace es el mismo producto. Los precios los lee siempre el lector
+(`scraper.py`); la IA no lee ni corrige precios. Necesita el secreto `GEMINI_API_KEY` en cada repositorio de datos; sin él todo funciona igual, pero sin IA.
 El precio que se compara es el **total en euros** (precio convertido con el cambio del BCE + envío).
 
 **Añadir otro perfil:** crear un repositorio privado con la misma estructura y añadirlo a `PERFILES` en `precios/app.js`.
