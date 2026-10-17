@@ -53,7 +53,12 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PRODUCTO: ${{ inputs.producto }}
           ACCION: ${{ inputs.accion || 'comprobar' }}
-        run: python _codigo/precios/vigilante/vigilante.py --datos precios --producto "$PRODUCTO" --accion "$ACCION"
+        run: |
+          if [ "$ACCION" = "diagnostico" ]; then
+            python _codigo/precios/vigilante/diagnostico.py precios
+          else
+            python _codigo/precios/vigilante/vigilante.py --datos precios --producto "$PRODUCTO" --accion "$ACCION"
+          fi
 
       - name: Guardar resultados
         run: |
