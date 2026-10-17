@@ -31,7 +31,13 @@ export const CATEGORIAS = [
 // o "AAAA-MM-DD" para uno concreto. Ejemplo:
 //   { fecha: "05-02", nombre: "Día de la Comunidad de Madrid" },
 //   { fecha: "2026-05-15", nombre: "San Isidro" },
-export const FESTIVOS_EXTRA = [];
+export const FESTIVOS_EXTRA = [
+  // Castilla y León
+  { fecha: "04-23", nombre: "Fiesta de Castilla y León" },
+  // Cuando un festivo nacional cae en domingo, la Junta lo pasa al lunes (cambia cada año)
+  { fecha: "2026-11-02", nombre: "Todos los Santos (trasladado)" },
+  { fecha: "2026-12-07", nombre: "Día de la Constitución (trasladado)" },
+];
 
-// ¿Es festivo el Jueves Santo donde vives? (lo es en casi toda España salvo Cataluña y Valencia)
+// ¿Es festivo el Jueves Santo donde vives? (en Castilla y León, sí)
 export const JUEVES_SANTO = true;

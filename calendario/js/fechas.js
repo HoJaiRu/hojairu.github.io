@@ -103,3 +103,32 @@ export function festivosDe(anio) {
 }
 
 export const festivo = (d) => festivosDe(d.getFullYear()).get(clave(d)) || "";
+
+// ---------- Puentes ----------
+const libre = (d) => d.getDay() % 6 === 0 || !!festivo(d);   // sábado, domingo o festivo
+
+// Próximo "puente": un festivo que, junto con el fin de semana, da 3 o más días libres seguidos.
+// Devuelve { nombre, inicio (Date), dias } o null.
+export function proximoPuente(desde, maxDias = 400) {
+  for (let i = 1; i <= maxDias; i++) {
+    const d = sumarDias(desde, i);
+    if (!festivo(d) || d.getDay() % 6 === 0) continue;   // festivo en día laborable
+    let inicio = d, fin = d;
+    while (libre(sumarDias(inicio, -1))) inicio = sumarDias(inicio, -1);
+    while (libre(sumarDias(fin, 1))) fin = sumarDias(fin, 1);
+    const dias = diasEntre(inicio, fin) + 1;
+    if (dias < 3 || clave(inicio) <= clave(desde)) {
+      i += diasEntre(d, fin);   // salta este bloque
+      continue;
+    }
+    // Nombre: el de Semana Santa si toca; si no, el del festivo
+    const nombres = [];
+    for (let x = inicio; clave(x) <= clave(fin); x = sumarDias(x, 1)) if (festivo(x)) nombres.push(festivo(x));
+    const tiene = (t) => nombres.some((n) => n.startsWith(t));
+    const nombre = tiene("Viernes Santo") ? "Semana Santa"
+      : tiene("Día de la Constitución") && tiene("Inmaculada") ? "Puente de diciembre"
+      : nombres[nombres.length - 1].replace(" (trasladado)", "");
+    return { nombre, inicio, dias };
+  }
+  return null;
+}

@@ -2,7 +2,7 @@
 // Saludo, lo que tienes hoy y mañana, y la cuenta atrás de lo destacado y del próximo festivo.
 
 import { CONFIG } from "./config.js";
-import { clave, hoy, sumarDias, diasEntre, fechaLarga, festivo, desdeClave } from "./fechas.js";
+import { clave, hoy, sumarDias, diasEntre, fechaLarga, festivo, desdeClave, proximoPuente } from "./fechas.js";
 import { notasDe, diasConNotas } from "./almacen.js";
 import { esc, colorDe } from "./vistas.js";
 
@@ -34,47 +34,53 @@ function lista(notas, fest, vacio) {
 
 export function pintarHoy() {
   const tarjeta = $("#tarjeta-hoy");
-  const d0 = hoy(), d1 = sumarDias(d0, 1);
-  const notasHoy = notasDe(clave(d0));
-  const notasManana = notasDe(clave(d1));
+  const d0 = hoy(), kHoy = clave(d0);
+  const notasHoy = notasDe(kHoy);
 
-  // Cuenta atrás: notas destacadas de los próximos días + el próximo festivo
-  const proximas = [];
+  // Próximos: las 3 notas pendientes más cercanas (después de hoy)
+  // Cuenta atrás: las notas destacadas de los próximos días
+  const futuras = [], destacadas = [];
   const limite = clave(sumarDias(d0, CONFIG.diasCuentaAtras));
   for (const [k, notas] of diasConNotas()) {
-    if (k <= clave(d0) || k > limite) continue;
-    for (const n of notas) if (n.destacada && !n.hecha) proximas.push(n);
+    if (k <= kHoy) continue;
+    for (const n of notas) {
+      if (n.hecha) continue;
+      futuras.push(n);
+      if (n.destacada && k <= limite) destacadas.push(n);
+    }
   }
-  proximas.sort((a, b) => a.fecha.localeCompare(b.fecha));
-
-  let proxFestivo = null;
-  for (let i = 1; i <= 366 && !proxFestivo; i++) {
-    const d = sumarDias(d0, i);
-    if (festivo(d)) proxFestivo = { nombre: festivo(d), dias: i };
-  }
+  const porFecha = (a, b) => a.fecha.localeCompare(b.fecha) || (a.hora || "99").localeCompare(b.hora || "99");
+  futuras.sort(porFecha);
+  destacadas.sort(porFecha);
+  const faltan = (n) => diasEntre(d0, desdeClave(n.fecha));
 
   $("#hoy-saludo").textContent = saludo();
   $("#hoy-fecha").textContent = fechaLarga(d0);
   $("#hoy-lista").innerHTML = lista(notasHoy, festivo(d0), "Nada anotado");
-  $("#manana-lista").innerHTML = lista(notasManana, festivo(d1), "Nada anotado");
 
-  let cuenta = proximas.slice(0, 5).map((n) => {
-    const dias = diasEntre(d0, desdeClave(n.fecha));
-    return `<li><button class="mini-nota cuenta" data-fecha="${n.fecha}" style="--c:${colorDe(n.cat)}">` +
-      `<i></i><span>${esc(n.texto)}</span><b>${enDias(dias)}</b></button></li>`;
-  }).join("");
-  if (proxFestivo) {
-    cuenta += `<li class="festivo-item"><span>${esc(proxFestivo.nombre)}</span><b>${enDias(proxFestivo.dias)}</b></li>`;
+  $("#proximos-lista").innerHTML = futuras.slice(0, 3).map((n) => itemCuenta(n, faltan(n))).join("")
+    || `<li class="tenue vacio">No hay nada anotado más adelante</li>`;
+
+  let cuenta = destacadas.slice(0, 4).map((n) => itemCuenta(n, faltan(n))).join("");
+  const puente = proximoPuente(d0);
+  if (puente) {
+    cuenta += `<li class="festivo-item"><span>${esc(puente.nombre)} · ${puente.dias} días libres</span>` +
+      `<b>${enDias(diasEntre(d0, puente.inicio))}</b></li>`;
   }
   $("#cuenta-lista").innerHTML = cuenta || `<li class="tenue vacio">Destaca una nota (★) para verla aquí</li>`;
 
   // Resumen de una línea, para cuando la tarjeta está plegada
   const pendientes = notasHoy.filter((n) => !n.hecha).length;
   let corto = pendientes ? `${pendientes} cosa${pendientes > 1 ? "s" : ""} hoy` : "Nada pendiente hoy";
-  if (proximas[0]) corto += ` · ${proximas[0].texto.slice(0, 40)} ${enDias(diasEntre(d0, desdeClave(proximas[0].fecha)))}`;
+  if (futuras[0]) corto += ` · ${futuras[0].texto.slice(0, 40)} ${enDias(faltan(futuras[0]))}`;
   $("#hoy-corto").textContent = corto;
 
   return tarjeta;
+}
+
+function itemCuenta(n, dias) {
+  return `<li><button class="mini-nota cuenta" data-fecha="${n.fecha}" style="--c:${colorDe(n.cat)}">` +
+    `<i></i><span>${esc(n.texto)}</span><b>${enDias(dias)}</b></button></li>`;
 }
 
 export function iniciarHoy(alPulsarFecha) {
