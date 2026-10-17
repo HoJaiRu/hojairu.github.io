@@ -1,15 +1,43 @@
 # hojairu.github.io
 
-Código de mis webs personales, publicado con GitHub Pages.
-Aquí **solo hay código**: los datos de cada persona están en su propio repositorio privado
-y la web los lee con la llave (token) de esa persona.
+Código de mis webs personales, publicado con GitHub Pages en https://hojairu.github.io/
 
-## Vigilante de precios — https://hojairu.github.io/precios/
+Aquí **solo hay código** (este repositorio es público). Los datos de cada persona están en su
+propio repositorio **privado** y la web los lee con la llave (token) de esa persona.
 
-| Carpeta / archivo | Para qué sirve |
+## Cómo está organizado
+
+```
+hojairu.github.io/
+├── index.html            Portada: enlaces a todas las webs
+├── comun/                Lo que comparten todas las webs
+│   ├── base.css          Colores (oscuro / claro), letra y botones
+│   ├── tema.js           Botón de modo oscuro / claro
+│   └── portada.*         Estilo y botón de la portada
+├── calendario/           Calendario y resumen matinal
+├── precios/              Vigilante de precios
+│   └── vigilante/        El lector de precios (Python) que ejecuta GitHub Actions
+└── .github/workflows/    Tareas automáticas (GitHub obliga a que estén aquí)
+```
+
+**Regla:** cada web vive entera en su carpeta, con su propio `README.md`.
+Para una web nueva: crear su carpeta, enlazarla en `index.html` y, si guarda datos,
+crear la misma carpeta en el repositorio privado `WEBS`.
+
+## Webs
+
+| Web | Dirección | Datos (privados) |
+|---|---|---|
+| Calendario | https://hojairu.github.io/calendario/ | `WEBS/calendario/` — ver [calendario/README.md](calendario/README.md) |
+| Vigilante de precios | https://hojairu.github.io/precios/ | `WEBS/precios/` y `precios-perfil2` |
+| Cartera | — | Pendiente |
+
+## Vigilante de precios
+
+| Archivo | Para qué sirve |
 |---|---|
-| `precios/` | La web (HTML, CSS y JavaScript) |
-| `vigilante/` | El lector de precios (Python) que ejecuta GitHub Actions |
+| `precios/` (index.html, app.js, style.css) | La web |
+| `precios/vigilante/` | El lector de precios (Python) |
 | `.github/workflows/vigilar-precios.yml` | Workflow reutilizable: lo llaman los repositorios de datos |
 
 Repositorios de datos (privados): `WEBS` (HoJaiRu) y `precios-perfil2`.

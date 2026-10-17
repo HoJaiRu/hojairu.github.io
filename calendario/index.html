@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://api.github.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0f0f12">
+  <title>Calendario</title>
+  <link rel="icon" href="icono.svg" type="image/svg+xml">
+  <script src="../comun/tema.js"></script>
+  <link rel="stylesheet" href="../comun/base.css">
+  <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+  <!-- ===== BARRA DE HERRAMIENTAS ===== -->
+  <header class="barra">
+    <div class="barra-lado">
+      <a class="volver" href="../" title="Mis webs" aria-label="Mis webs">◂</a>
+      <button id="btn-hoy" class="btn" title="Volver a hoy (T)">Hoy</button>
+    </div>
+
+    <div class="segmentos" role="tablist" aria-label="Vista">
+      <button role="tab" data-vista="mes" title="Mes (1)">Mes</button>
+      <button role="tab" data-vista="tres" title="3 meses (2)">3 meses</button>
+      <button role="tab" data-vista="anio" title="Año (3)">Año</button>
+    </div>
+
+    <div class="barra-lado der">
+      <button id="sync" class="sync" title="Solo en este navegador"><i></i><span>Local</span></button>
+      <button id="btn-tema" class="btn-icono" title="Modo claro / oscuro" aria-label="Cambiar tema"></button>
+      <div class="menu-envoltura">
+        <button id="btn-menu" class="btn-icono" title="Más opciones" aria-label="Más opciones" aria-expanded="false">⋯</button>
+        <div id="menu" class="menu" hidden>
+          <button data-accion="conectar">Sincronizar con GitHub…</button>
+          <button data-accion="sincronizar" hidden>Sincronizar ahora</button>
+          <button data-accion="exportar">Descargar copia de seguridad</button>
+          <button data-accion="importar">Cargar copia de seguridad…</button>
+          <button data-accion="desconectar" class="peligro" hidden>Desconectar este navegador</button>
+          <hr>
+          <p class="menu-ayuda">Atajos: ← → mes · T hoy · 1 2 3 vistas · N nota</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===== TARJETA "HOY" (resumen matinal, plegable) ===== -->
+    <details id="tarjeta-hoy" class="tarjeta-hoy">
+      <summary>
+        <span class="saludo" id="hoy-saludo">Hola</span>
+        <span class="hoy-fecha" id="hoy-fecha"></span>
+        <span class="hoy-corto tenue" id="hoy-corto"></span>
+        <span class="flechita" aria-hidden="true">⌄</span>
+      </summary>
+      <div class="hoy-cuerpo">
+        <section><h3>Hoy</h3><ul id="hoy-lista" class="mini-lista"></ul></section>
+        <section><h3>Mañana</h3><ul id="manana-lista" class="mini-lista"></ul></section>
+        <section><h3>Cuenta atrás</h3><ul id="cuenta-lista" class="mini-lista"></ul></section>
+      </div>
+    </details>
+
+    <!-- ===== CALENDARIO ===== -->
+    <section class="calendario">
+      <button class="flecha" id="btn-anterior" aria-label="Anterior">‹</button>
+      <div class="cal-centro">
+        <h1 id="titulo" class="titulo"></h1>
+        <div id="vista" class="vista"></div>
+      </div>
+      <button class="flecha" id="btn-siguiente" aria-label="Siguiente">›</button>
+    </section>
+
+    <footer id="leyenda" class="leyenda"></footer>
+  </main>
+
+  <!-- ===== PANEL DEL DÍA (se abre al pulsar un día) ===== -->
+  <div id="velo" class="velo" hidden></div>
+  <aside id="panel" class="panel" aria-hidden="true">
+    <header class="panel-cab">
+      <div>
+        <p class="tenue panel-semana" id="panel-semana"></p>
+        <h2 id="panel-fecha"></h2>
+        <p class="panel-festivo" id="panel-festivo" hidden></p>
+      </div>
+      <button class="btn-icono" id="btn-cerrar-panel" aria-label="Cerrar">✕</button>
+    </header>
+
+    <ul id="panel-notas" class="lista-notas"></ul>
+    <p id="panel-vacio" class="tenue panel-vacio">Nada anotado este día.</p>
+
+    <form id="form-nota" class="form-nota" autocomplete="off">
+      <textarea id="nota-texto" rows="2" placeholder="Añadir una nota…" maxlength="500" required></textarea>
+      <div id="nota-cats" class="cats" role="radiogroup" aria-label="Categoría"></div>
+      <div class="fila">
+        <label class="campo-hora" title="Hora (opcional)">
+          <span aria-hidden="true">◷</span>
+          <input type="time" id="nota-hora" aria-label="Hora (opcional)">
+        </label>
+        <label class="interruptor" title="Sale en la cuenta atrás y colorea el día">
+          <input type="checkbox" id="nota-destacada"> <span>★ Destacar</span>
+        </label>
+      </div>
+      <div class="fila fin">
+        <button type="button" id="btn-cancelar-edicion" class="btn-texto" hidden>Cancelar</button>
+        <button class="btn primario" id="btn-guardar-nota" type="submit">Añadir</button>
+      </div>
+    </form>
+  </aside>
+
+  <!-- ===== CONECTAR CON GITHUB ===== -->
+  <dialog id="dlg-llave" class="dialogo">
+    <form id="form-llave" method="dialog">
+      <h2>Sincronizar con GitHub</h2>
+      <p class="tenue">Tus notas se guardarán también en tu repositorio <b>privado</b> WEBS,
+        para verlas en el PC y en el móvil. Pega tu llave de GitHub (la misma que usa el
+        Vigilante de precios). Solo se guarda en este navegador.</p>
+      <input id="llave" type="password" placeholder="github_pat_…" spellcheck="false" required>
+      <p id="llave-error" class="error" hidden></p>
+      <div class="fila fin">
+        <button type="button" class="btn" id="btn-cancelar-llave">Cancelar</button>
+        <button type="submit" class="btn primario" id="btn-conectar">Conectar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <input type="file" id="archivo-importar" accept=".json,application/json" hidden>
+  <div id="aviso" class="aviso" role="status" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -3,9 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="0; url=precios/">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
   <meta name="robots" content="noindex, nofollow">
   <title>Mis webs</title>
+  <script src="comun/tema.js"></script>
+  <link rel="stylesheet" href="comun/base.css">
+  <link rel="stylesheet" href="comun/portada.css">
 </head>
-<body><a href="precios/">Vigilante de precios</a></body>
+<body>
+  <main class="portada">
+    <header>
+      <h1>Mis webs</h1>
+      <button id="btn-tema" class="btn-icono" aria-label="Cambiar tema" title="Modo claro / oscuro"></button>
+    </header>
+
+    <!-- Para añadir una web nueva: copia un bloque <a> y cambia el enlace, el icono y el texto -->
+    <nav class="webs">
+      <a class="web" href="calendario/">
+        <span class="icono">▦</span>
+        <span><b>Calendario</b><small>Notas por día y resumen de la mañana</small></span>
+      </a>
+      <a class="web" href="precios/">
+        <span class="icono">€</span>
+        <span><b>Vigilante de precios</b><small>Avisa cuando algo llega a tu precio</small></span>
+      </a>
+      <span class="web proximamente">
+        <span class="icono">↗</span>
+        <span><b>Cartera</b><small>Próximamente</small></span>
+      </span>
+    </nav>
+  </main>
+  <script src="comun/portada.js"></script>
+</body>
 </html>
