@@ -70,6 +70,36 @@ def euros(n):
     return format(n, ",.2f").replace(",", "X").replace(".", ",").replace("X", ".") + " €"
 
 
+# ---------- Gasto de la IA ----------
+def hoy():
+    return iso(ahora())[:10]
+
+
+def uso_ia_hoy(estado):
+    """Consultas a la IA de hoy en este perfil: comprobaciones (estado) + búsquedas (un archivo cada una)."""
+    total = estado.get("ia", {}).get("hoy", {}).get("consultas", 0) if estado.get("ia", {}).get("hoy", {}).get("fecha") == hoy() else 0
+    if BUSQUEDAS.exists():
+        for archivo in BUSQUEDAS.glob("*.json"):
+            u = leer(archivo, {}).get("uso_ia") or {}
+            if u.get("fecha") == hoy():
+                total += u.get("consultas", 0)
+    return total
+
+
+def anotar_uso_ia(estado):
+    """Guarda en estado.json lo que ha gastado la IA hoy y este mes (para vigilar el saldo)."""
+    previo = estado.get("ia", {})
+    dia = previo.get("hoy", {}) if previo.get("hoy", {}).get("fecha") == hoy() else {"fecha": hoy(), "consultas": 0}
+    mes = previo.get("mes", {}) if previo.get("mes", {}).get("mes") == hoy()[:7] else {
+        "mes": hoy()[:7], "consultas": 0, "tokens": 0, "busquedas_google": 0}
+    dia["consultas"] += ia.llamadas()
+    mes["consultas"] += ia.llamadas()
+    mes["tokens"] += ia.uso["tokens"]
+    mes["busquedas_google"] += ia.uso["busquedas_google"]
+    estado["ia"] = {"activa": ia.activa(), "limite_diario": ia.LIMITE_DIARIO, "hoy": dia, "mes": mes,
+                    "problemas": ia.diagnostico}
+
+
 # ---------- Monedas (tipos de cambio diarios del Banco Central Europeo) ----------
 TASAS = {"EUR": 1.0}
 
@@ -332,7 +362,7 @@ def buscar(producto):
     registro = {"inicio": iso(ahora()), "fin": None, "error": None, "candidatos": [], "descartados": 0}
     if not ia.activa():
         registro.update(error="La búsqueda con IA aún no está activada (falta la clave de Gemini).",
-                        fin=iso(ahora()))
+                        fin=iso(ahora()), uso_ia={"fecha": hoy(), "consultas": 0})
         return registro
     print(f"Buscando tiendas para «{producto['nombre']}»...")
     try:
@@ -343,7 +373,8 @@ def buscar(producto):
         try:
             encontrados = buscar_plan_b(producto)
         except ia.ErrorIA as e2:
-            registro.update(error=f"La IA no pudo buscar: {e2}", fin=iso(ahora()), problemas=ia.diagnostico)
+            registro.update(error=f"La IA no pudo buscar: {e2}", fin=iso(ahora()), problemas=ia.diagnostico,
+                            uso_ia={"fecha": hoy(), "consultas": ia.llamadas()})
             return registro
 
     ya = {clave_url(en["url"]) for en in producto.get("enlaces", [])}
@@ -406,6 +437,7 @@ def buscar(producto):
     registro["candidatos"] = verificados
     registro["fin"] = iso(ahora())
     registro["problemas"] = ia.diagnostico
+    registro["uso_ia"] = {"fecha": hoy(), "consultas": ia.llamadas()}
     if not verificados:
         registro["error"] = ("La IA no ha encontrado tiendas con precio legible. Prueba con un nombre más "
                              "concreto (marca y modelo) o pega los enlaces a mano.")
@@ -445,6 +477,7 @@ def main():
     estado.setdefault("enlaces", {})
     historial = leer(HISTORIAL, {})
     cargar_tasas(estado)
+    ia.fijar_cupo(uso_ia_hoy(estado))
     print(f"IA (Gemini): {'activada' if ia.activa() else 'desactivada (falta GEMINI_API_KEY)'}")
 
     if args.accion == "buscar":
@@ -452,7 +485,12 @@ def main():
         if not producto:
             print("No existe ese producto.")
             return
-        guardar(BUSQUEDAS / f"{producto['id']}.json", buscar(producto))
+        archivo = BUSQUEDAS / f"{producto['id']}.json"
+        anterior = (leer(archivo, {}).get("uso_ia") or {})
+        registro = buscar(producto)
+        if anterior.get("fecha") == hoy():    # no perder lo gastado hoy en búsquedas anteriores de este producto
+            registro["uso_ia"]["consultas"] += anterior.get("consultas", 0)
+        guardar(archivo, registro)
         print(f"Terminado. Consultas a la IA: {ia.llamadas()}")
         return
 
@@ -481,7 +519,7 @@ def main():
     limpiar(estado, historial, productos)
     revisar_ofertas(productos, estado)
     estado["ejecucion"] = {"inicio": inicio, "fin": iso(ahora()), "producto": solo or None}
-    estado["ia"] = {"activa": ia.activa(), "consultas": ia.llamadas(), "problemas": ia.diagnostico}
+    anotar_uso_ia(estado)
     if not solo:
         estado["ultima_revision"] = estado["ejecucion"]["fin"]
 

@@ -22,9 +22,14 @@ import requests
 
 BASE = "https://generativelanguage.googleapis.com/v1beta"
 API = BASE + "/models/{modelo}:generateContent"
-MAX_LLAMADAS = 25          # por ejecución, para no gastar el cupo gratis diario
+MAX_LLAMADAS = 25          # por ejecución
+# Tope diario por perfil (todas las ejecuciones del día juntas). Con ~5 € de saldo al mes y dos
+# perfiles, este tope garantiza que no se gaste todo de golpe aunque algo falle en bucle.
+LIMITE_DIARIO = int(os.environ.get("GEMINI_LIMITE_DIARIO", "40"))
 
 _llamadas = 0
+_cupo = MAX_LLAMADAS       # lo que queda hoy, como mucho MAX_LLAMADAS (ver fijar_cupo)
+uso = {"tokens": 0, "busquedas_google": 0}   # para saber cuánto se gasta de verdad
 _modelo_ok = None
 _modelos = None
 diagnostico = []           # problemas con la IA en esta ejecución (se guardan en estado.json)
@@ -71,14 +76,20 @@ def llamadas():
     return _llamadas
 
 
+def fijar_cupo(usadas_hoy):
+    """Cuántas consultas quedan en esta ejecución según lo ya gastado hoy por este perfil."""
+    global _cupo
+    _cupo = max(0, min(MAX_LLAMADAS, LIMITE_DIARIO - usadas_hoy))
+
+
 # ---------- Llamada a Gemini ----------
 def _pedir(prompt, herramientas=None, json_puro=False):
     """Devuelve (texto, metadatos de búsqueda)."""
     global _llamadas, _modelo_ok
     if not activa():
         raise ErrorIA("Falta la clave de Gemini (secreto GEMINI_API_KEY)")
-    if _llamadas >= MAX_LLAMADAS:
-        raise ErrorIA("Límite de consultas a la IA de esta comprobación alcanzado")
+    if _llamadas >= _cupo:
+        raise ErrorIA(f"Tope de consultas a la IA alcanzado (máximo {LIMITE_DIARIO} al día por perfil)")
     cuerpo = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
               "generationConfig": {"temperature": 0.2}}
     if herramientas:
@@ -123,11 +134,15 @@ def _pedir(prompt, herramientas=None, json_puro=False):
                 fallos.append(f"{modelo}: HTTP {r.status_code} {_mensaje(r)}")
                 break
             datos = r.json()
+            meta_uso = datos.get("usageMetadata") or {}
+            uso["tokens"] += int(meta_uso.get("totalTokenCount") or 0)
             _modelo_ok = modelo
             cand = (datos.get("candidates") or [{}])[0]
             texto = "".join(p.get("text", "") for p in cand.get("content", {}).get("parts", [])
                             if not p.get("thought"))
-            return texto, cand.get("groundingMetadata") or {}
+            busqueda = cand.get("groundingMetadata") or {}
+            uso["busquedas_google"] += len(busqueda.get("webSearchQueries") or [])
+            return texto, busqueda
     _modelo_ok = None if fallos else _modelo_ok
     error = "; ".join(fallos) or "sin respuesta"
     _apuntar(error)
