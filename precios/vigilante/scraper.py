@@ -9,7 +9,6 @@ Orden de busqueda (se queda con lo primero que encuentre):
 import json
 import re
 import time
-import atexit
 import base64
 from urllib.parse import parse_qs, quote_plus, urlparse
 
@@ -81,7 +80,19 @@ def url_amazon_movil(url):
     return f"https://{p.hostname}/gp/aw/d/{m.group(1).upper()}?th=1&psc=1"
 
 MARCAS_BLOQUEO = ["captcha", "just a moment", "attention required", "access denied",
-                  "robot check", "are you a human", "unusual traffic", "pardon our interruption"]
+                  "robot check", "are you a human", "unusual traffic", "pardon our interruption",
+                  "verificación de seguridad", "not a robot", "no eres un robot",
+                  "enable javascript and cookies", "javascript is disabled"]
+
+
+def parece_bloqueo(soup):
+    """Busca las marcas en el texto que se ve, no en los scripts: muchas tiendas normales
+    cargan reCAPTCHA y eso no es un bloqueo (le pasaba a Aromas)."""
+    for s in soup(["script", "style", "noscript"]):
+        s.decompose()
+    titulo = soup.title.get_text(" ", strip=True).lower() if soup.title else ""
+    texto = titulo + " " + soup.get_text(" ", strip=True)[:5000].lower()
+    return titulo in ("un momento…", "un momento...") or any(m in texto for m in MARCAS_BLOQUEO)
 
 
 def nombre_tienda(url):
@@ -329,6 +340,20 @@ def _desde_meta(soup):
     return {k: v for k, v in res.items() if v is not None}
 
 
+# ---------- 4. Plantillas de tienda muy usadas ----------
+# Salesforce Commerce Cloud (Aromas y otras): <span class="sales"><span class="value" content="72.95">
+GENERICOS = [(".prices .sales .value", "content"), (".price .sales .value", "content"),
+             (".sales .value", "content")]
+
+
+def _desde_genericos(soup):
+    for sel in GENERICOS:
+        precio = leer_precio_texto(_valor(soup, sel), estructurado=True)
+        if precio:
+            return {"precio": precio}
+    return {}
+
+
 # ---------- Descarga ----------
 def descargar(url, imitar="chrome"):
     opciones = {"headers": CABECERAS, "timeout": 25, "allow_redirects": True}
@@ -354,14 +379,14 @@ def analizar(html, url):
     """Extrae los datos de un HTML ya descargado."""
     soup = BeautifulSoup(html, "html.parser")
     datos = {}
-    for fuente in (_desde_jsonld(soup), _desde_selectores(soup, url, html), _desde_meta(soup)):
+    for fuente in (_desde_jsonld(soup), _desde_selectores(soup, url, html), _desde_meta(soup),
+                   _desde_genericos(soup)):
         for k, v in fuente.items():
             if datos.get(k) is None and v is not None:
                 datos[k] = v
 
     if not datos.get("precio") and datos.get("stock") is not False:
-        texto = html[:200000].lower()
-        if any(m in texto for m in MARCAS_BLOQUEO):
+        if parece_bloqueo(soup):
             raise ErrorLectura("La tienda ha mostrado un captcha o bloqueo anti-bots", "bloqueo", html)
         raise ErrorLectura("No encuentro el precio en la página (puede que la tienda lo cargue con JavaScript)",
                            "sin_precio", html)
@@ -414,61 +439,8 @@ def _comprobar_normal(url):
                 raise
         except Exception:      # esta versión de curl_cffi no conoce esa imitación
             continue
-    # Último intento del lector: abrir la página en un Chrome de verdad (pasa muchas comprobaciones anti-bots)
-    try:
-        return analizar(descargar_navegador(url), url)
-    except ErrorLectura as e:
-        if e.tipo != "bloqueo":
-            raise
+    # Un Chrome de verdad (Playwright) se probó y no pasa estos bloqueos desde GitHub: solo hacía todo más lento.
     raise primero
-
-
-# ---------- Navegador de verdad (Chrome sin ventana) ----------
-_navegador = None
-
-
-def descargar_navegador(url, espera=25):
-    """Abre la página con Chrome (ya instalado en los servidores de GitHub) y devuelve el HTML final.
-    Es lento (unos segundos por página), por eso solo se usa cuando la tienda bloquea lo demás."""
-    global _navegador
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        raise ErrorLectura("La tienda bloquea la lectura automática (navegador no disponible)", "bloqueo")
-    try:
-        if _navegador is None:
-            pw = sync_playwright().start()
-            try:
-                _navegador = pw.chromium.launch(channel="chrome", headless=True,
-                                                args=["--disable-blink-features=AutomationControlled"])
-            except Exception:
-                _navegador = pw.chromium.launch(headless=True,
-                                                args=["--disable-blink-features=AutomationControlled"])
-            atexit.register(_navegador.close)
-        contexto = _navegador.new_context(locale="es-ES", timezone_id="Europe/Madrid",
-                                          viewport={"width": 1366, "height": 900})
-        pagina = contexto.new_page()
-        pagina.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        try:
-            pagina.goto(url, wait_until="domcontentloaded", timeout=espera * 1000)
-            # Si sale la pantalla de "comprobando que eres humano", esperar a que se resuelva sola
-            for _ in range(espera // 3):
-                html = pagina.content()
-                bajo = html[:200000].lower()
-                if not any(m in bajo for m in MARCAS_BLOQUEO) and ("ld+json" in bajo or "price" in bajo):
-                    break
-                pagina.wait_for_timeout(3000)
-            try:
-                pagina.wait_for_load_state("networkidle", timeout=5000)
-            except Exception:
-                pass
-            return pagina.content()
-        finally:
-            contexto.close()
-    except ErrorLectura:
-        raise
-    except Exception as e:
-        raise ErrorLectura(f"La tienda bloquea la lectura automática (navegador: {type(e).__name__})", "bloqueo")
 
 
 # ---------- Ayudas para la IA ----------

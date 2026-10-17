@@ -1,0 +1,82 @@
+{
+ "inicio": "2026-10-17T14:50:37Z",
+ "fin": "2026-10-17T14:50:38Z",
+ "error": null,
+ "candidatos": [
+  {
+   "id": "c0",
+   "url": "https://www.amazon.de/dp/B0CSPN2G5Z?ref=x",
+   "tienda": "Amazon (DE)",
+   "pais": "DE",
+   "titulo": "Razer Viper V3 Pro",
+   "imagen": "i",
+   "precio": 90.0,
+   "moneda": "EUR",
+   "stock": true,
+   "envio": {
+    "coste": 5.0,
+    "gratis_desde": 39.0,
+    "moneda": "EUR",
+    "nota": null,
+    "fuente": "IA"
+   },
+   "fuente": "lector",
+   "aviso_lector": null,
+   "precio_eur": 90.0,
+   "envio_eur": 0.0,
+   "envio_fuente": "IA",
+   "total_eur": 90.0,
+   "coincide": {
+    "veredicto": "si",
+    "motivo": "ok",
+    "titulo": "Razer Viper V3 Pro"
+   }
+  },
+  {
+   "id": "c1",
+   "url": "https://shop.us/item/1",
+   "tienda": "shop.us",
+   "pais": "US",
+   "titulo": "Viper US",
+   "imagen": null,
+   "precio": 99.0,
+   "moneda": "USD",
+   "stock": true,
+   "envio": {
+    "coste": 20.0,
+    "gratis_desde": null,
+    "moneda": "USD",
+    "nota": null,
+    "fuente": "IA"
+   },
+   "fuente": "lector",
+   "aviso_lector": null,
+   "precio_eur": 90.0,
+   "envio_eur": 18.18,
+   "envio_fuente": "IA",
+   "total_eur": 108.18,
+   "coincide": {
+    "veredicto": "si",
+    "motivo": "ok",
+    "titulo": "Viper US"
+   }
+  }
+ ],
+ "descartados": 1,
+ "interpretado": {
+  "producto": "Razer Viper V3 Pro",
+  "consulta": "Razer Viper V3 Pro raton",
+  "resumen": "Ratón",
+  "claves": "negro"
+ },
+ "traza": {
+  "google": 5,
+  "respuesta_google": "```json\n{\"resultados\":[{\"url\":\"https://www.amazon.de/dp/B0CSPN2G5Z?ref=x\",\"tienda\":\"Amazon DE\",\"pais\":\"DE\",\"envio_coste\":5,\"envio_gratis_desde\":39,\"envio_moneda\":\"EUR\"},{\"url\":\"https://shop.us/item/1\",\"tienda\":\"Shop US\",\"pais\":\"US\",\"envio_coste\":20,\"envio_moneda\":\"USD\"},{\"url\":\"https://roto.es/x\",\"t",
+  "buscador": "error: el buscador web no ha devuelto resultados"
+ },
+ "problemas": [],
+ "uso_ia": {
+  "fecha": "2026-10-17",
+  "consultas": 3
+ }
+}
