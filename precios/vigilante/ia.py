@@ -18,14 +18,42 @@ import time
 
 import requests
 
-API = "https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent"
-# "gemini-flash-latest" apunta siempre al modelo rápido más nuevo; el otro es el de reserva.
-MODELOS = [m for m in [os.environ.get("GEMINI_MODEL", "").strip(),
-                       "gemini-flash-latest", "gemini-2.5-flash"] if m]
+BASE = "https://generativelanguage.googleapis.com/v1beta"
+API = BASE + "/models/{modelo}:generateContent"
 MAX_LLAMADAS = 25          # por ejecución, para no gastar el cupo gratis diario
 
 _llamadas = 0
 _modelo_ok = None
+_modelos = None
+diagnostico = []           # problemas con la IA en esta ejecución (se guardan en estado.json)
+
+
+def _apuntar(texto):
+    print(f"  [IA] {texto}")
+    if texto not in diagnostico:
+        diagnostico.append(texto[:300])
+
+
+def _elegir_modelos(cabeceras):
+    """Pregunta a Google qué modelos hay y prueba primero los "flash" estables más nuevos."""
+    preferido = os.environ.get("GEMINI_MODEL", "").strip()
+    nombres = []
+    try:
+        r = requests.get(BASE + "/models?pageSize=200", headers=cabeceras, timeout=30)
+        r.raise_for_status()
+        nombres = [m["name"].removeprefix("models/") for m in r.json().get("models", [])
+                   if "generateContent" in m.get("supportedGenerationMethods", [])]
+    except Exception as e:
+        _apuntar(f"No pude listar los modelos de Gemini: {e}")
+
+    def version(n):
+        m = re.match(r"gemini-(\d+(?:\.\d+)?)-flash$", n)
+        return float(m.group(1)) if m else -1
+
+    estables = sorted((n for n in nombres if version(n) > 0), key=version, reverse=True)
+    resto = [n for n in ("gemini-flash-latest", "gemini-2.5-flash") if not nombres or n in nombres]
+    lista = [m for m in [preferido, *estables, *resto] if m]
+    return list(dict.fromkeys(lista)) or ["gemini-flash-latest"]
 
 
 class ErrorIA(Exception):
@@ -57,27 +85,31 @@ def _pedir(prompt, herramientas=None, json_puro=False):
     cabeceras = {"x-goog-api-key": os.environ["GEMINI_API_KEY"].strip(),
                  "Content-Type": "application/json"}
 
-    modelos = [_modelo_ok] if _modelo_ok else MODELOS
-    ultimo = "sin respuesta"
+    global _modelos
+    if _modelos is None:
+        _modelos = _elegir_modelos(cabeceras)
+        print(f"  [IA] Modelos a probar: {', '.join(_modelos[:4])}")
+    modelos = [_modelo_ok] if _modelo_ok else _modelos[:4]
+    fallos = []
     for modelo in modelos:
         for intento in range(3):
             _llamadas += 1
             try:
                 r = requests.post(API.format(modelo=modelo), json=cuerpo, headers=cabeceras, timeout=120)
             except requests.RequestException as e:
-                ultimo = f"sin conexión con Gemini ({type(e).__name__})"
+                fallos.append(f"{modelo}: sin conexión ({type(e).__name__})")
                 time.sleep(5)
                 continue
             if r.status_code == 404:          # ese modelo no existe: probar el siguiente
-                ultimo = f"modelo {modelo} no disponible"
+                fallos.append(f"{modelo}: no disponible")
                 break
             if r.status_code in (429, 500, 503) and intento < 2:
                 time.sleep(20 * (intento + 1))  # cupo por minuto o Gemini saturado
                 continue
-            if r.status_code in (400, 401, 403):
-                raise ErrorIA(f"Gemini rechazó la petición (HTTP {r.status_code}): {_mensaje(r)}")
-            if r.status_code >= 400:
-                ultimo = f"Gemini respondió HTTP {r.status_code}: {_mensaje(r)}"
+            if r.status_code in (401, 403):
+                raise ErrorIA(f"Gemini rechazó la clave (HTTP {r.status_code}): {_mensaje(r)}")
+            if r.status_code >= 400:      # 400 = ese modelo no admite algo (p. ej. la búsqueda): probar otro
+                fallos.append(f"{modelo}: HTTP {r.status_code} {_mensaje(r)}")
                 break
             datos = r.json()
             _modelo_ok = modelo
@@ -85,7 +117,10 @@ def _pedir(prompt, herramientas=None, json_puro=False):
             texto = "".join(p.get("text", "") for p in cand.get("content", {}).get("parts", [])
                             if not p.get("thought"))
             return texto, cand.get("groundingMetadata") or {}
-    raise ErrorIA(ultimo)
+    _modelo_ok = None if fallos else _modelo_ok
+    error = "; ".join(fallos) or "sin respuesta"
+    _apuntar(error)
+    raise ErrorIA(error)
 
 
 def _mensaje(r):

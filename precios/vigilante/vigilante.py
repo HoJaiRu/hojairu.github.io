@@ -306,7 +306,7 @@ def buscar(producto):
     try:
         encontrados = ia.buscar_tiendas(producto["nombre"], producto.get("descripcion", ""))
     except ia.ErrorIA as e:
-        registro.update(error=f"La IA no pudo buscar: {e}", fin=iso(ahora()))
+        registro.update(error=f"La IA no pudo buscar: {e}", fin=iso(ahora()), problemas=ia.diagnostico)
         return registro
 
     ya = {clave_url(en["url"]) for en in producto.get("enlaces", [])}
@@ -364,6 +364,7 @@ def buscar(producto):
                                     c["stock"] is False, c.get("total_eur") or 1e9))
     registro["candidatos"] = verificados
     registro["fin"] = iso(ahora())
+    registro["problemas"] = ia.diagnostico
     if not verificados:
         registro["error"] = ("La IA no ha encontrado tiendas con precio legible. Prueba con un nombre más "
                              "concreto (marca y modelo) o pega los enlaces a mano.")
@@ -438,6 +439,7 @@ def main():
     limpiar(estado, historial, productos)
     revisar_ofertas(productos, estado)
     estado["ejecucion"] = {"inicio": inicio, "fin": iso(ahora()), "producto": solo or None}
+    estado["ia"] = {"activa": ia.activa(), "consultas": ia.llamadas(), "problemas": ia.diagnostico}
     if not solo:
         estado["ultima_revision"] = estado["ejecucion"]["fin"]
 
