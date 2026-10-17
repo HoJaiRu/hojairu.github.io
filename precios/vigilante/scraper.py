@@ -382,7 +382,7 @@ def comprobar(url):
     """Descarga y analiza un enlace. Lanza ErrorLectura si algo falla."""
     movil = url_amazon_movil(url)
     if not movil:
-        return analizar(descargar(url), url)
+        return _comprobar_normal(url)
     try:
         return analizar(descargar(movil, imitar="safari_ios"), movil)
     except ErrorLectura as e:
@@ -390,6 +390,30 @@ def comprobar(url):
             raise
         time.sleep(6)  # a veces basta con reintentar
         return analizar(descargar(movil, imitar="safari_ios"), movil)
+
+
+# Si una tienda bloquea al "Chrome de escritorio", se prueba como móvil (Sephora, por ejemplo,
+# solo deja leer así desde los servidores de GitHub). Probado con diagnostico.py.
+IMITACIONES_RESERVA = ["safari_ios", "chrome_android"]
+
+
+def _comprobar_normal(url):
+    try:
+        return analizar(descargar(url), url)
+    except ErrorLectura as e:
+        if e.tipo != "bloqueo" or not IMITA_CHROME:
+            raise
+        primero = e
+    for imitar in IMITACIONES_RESERVA:
+        time.sleep(2)
+        try:
+            return analizar(descargar(url, imitar=imitar), url)
+        except ErrorLectura as e:
+            if e.tipo != "bloqueo":
+                raise
+        except Exception:      # esta versión de curl_cffi no conoce esa imitación
+            continue
+    raise primero
 
 
 # ---------- Ayudas para la IA ----------
