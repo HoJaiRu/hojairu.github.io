@@ -52,7 +52,8 @@ def _elegir_modelos(cabeceras):
 
     estables = sorted((n for n in nombres if version(n) > 0), key=version, reverse=True)
     resto = [n for n in ("gemini-flash-latest", "gemini-2.5-flash") if not nombres or n in nombres]
-    lista = [m for m in [preferido, *estables, *resto] if m]
+    # Los 2 "flash" más nuevos y, de reserva, el alias "latest" y el 2.5 (cada modelo tiene su propio cupo)
+    lista = [m for m in [preferido, *estables[:2], *resto, *estables[2:]] if m]
     return list(dict.fromkeys(lista)) or ["gemini-flash-latest"]
 
 
