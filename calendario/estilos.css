@@ -222,11 +222,12 @@ main { max-width: 1240px; margin: 0 auto; padding: 4px 20px 48px; transition: pa
 .tres .mini-dia.sin-clase { background: color-mix(in srgb, var(--festivo) 10%, var(--superficie)); }
 .mini-dia.sin-clase .num { color: var(--festivo); }
 /* Mapa de calor del año: más notas = color más intenso */
-.mini-dia[data-calor="1"] { background: color-mix(in srgb, var(--acento) 18%, transparent); }
-.mini-dia[data-calor="2"] { background: color-mix(in srgb, var(--acento) 34%, transparent); }
-.mini-dia[data-calor="3"] { background: color-mix(in srgb, var(--acento) 52%, transparent); }
-.mini-dia[data-calor="4"] { background: color-mix(in srgb, var(--acento) 72%, transparent); }
-.mini-dia.tenido { background: color-mix(in srgb, var(--tinte) 45%, transparent); }
+.mini-rejilla .mini-dia[data-calor="1"] { background: color-mix(in srgb, var(--acento) 18%, transparent); }
+.mini-rejilla .mini-dia[data-calor="2"] { background: color-mix(in srgb, var(--acento) 34%, transparent); }
+.mini-rejilla .mini-dia[data-calor="3"] { background: color-mix(in srgb, var(--acento) 52%, transparent); }
+.mini-rejilla .mini-dia[data-calor="4"] { background: color-mix(in srgb, var(--acento) 72%, transparent); }
+.mini-rejilla .mini-dia.tenido-suave { background: color-mix(in srgb, var(--tinte) 22%, transparent); }
+.mini-rejilla .mini-dia.tenido, .tres .mini-rejilla .mini-dia.tenido { background: color-mix(in srgb, var(--tinte) 45%, transparent); }
 
 /* Leyenda de colores */
 .leyenda {
@@ -356,6 +357,15 @@ main { max-width: 1240px; margin: 0 auto; padding: 4px 20px 48px; transition: pa
 .dia.festivo .nombre-festivo { font-weight: 600; }
 .dia.marca-curso .nombre-festivo { color: var(--acento); font-weight: 600; }
 .dia.marca-curso { border-color: color-mix(in srgb, var(--acento) 50%, transparent); }
+/* Las notas tienen prioridad de color sobre festivos y vacaciones */
+.dia.tenido.festivo, .dia.tenido.sin-clase {
+  background: color-mix(in srgb, var(--tinte) 20%, var(--superficie));
+  border-color: color-mix(in srgb, var(--tinte) 45%, transparent);
+}
+.dia.tenido-suave.festivo, .dia.tenido-suave.sin-clase {
+  background: color-mix(in srgb, var(--tinte) 11%, var(--superficie));
+  border-color: color-mix(in srgb, var(--tinte) 30%, transparent);
+}
 
 /* ===== Ventana "Conectar" ===== */
 .dialogo {
@@ -369,6 +379,10 @@ main { max-width: 1240px; margin: 0 auto; padding: 4px 20px 48px; transition: pa
 .dialogo p { margin: 0; font-size: 14px; }
 .dialogo input { width: 100%; }
 .error { color: var(--peligro); }
+.fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fila.fin { justify-content: flex-end; }
+.qr { display: block; width: 240px; max-width: 100%; margin: 4px auto; border-radius: 12px; image-rendering: pixelated; }
+.aviso-qr { color: var(--festivo); font-size: 13.5px; font-weight: 600; text-align: center; }
 
 /* ===== Aviso abajo ===== */
 .aviso {

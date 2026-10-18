@@ -9,6 +9,12 @@
   <meta name="theme-color" content="#0f0f12">
   <title>Calendario</title>
   <link rel="icon" href="icono.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icono-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Calendario">
   <script src="../comun/tema.js"></script>
   <link rel="stylesheet" href="../comun/base.css">
   <link rel="stylesheet" href="estilos.css">
@@ -35,6 +41,7 @@
         <div id="menu" class="menu" hidden>
           <button data-accion="conectar">Sincronizar con GitHub…</button>
           <button data-accion="sincronizar" hidden>Sincronizar ahora</button>
+          <button data-accion="movil" hidden>Abrir en el móvil (QR)…</button>
           <button data-accion="exportar">Descargar copia de seguridad</button>
           <button data-accion="importar">Cargar copia de seguridad…</button>
           <button data-accion="desconectar" class="peligro" hidden>Desconectar este navegador</button>
@@ -127,6 +134,19 @@
         <button type="button" class="btn" id="btn-cancelar-llave">Cancelar</button>
         <button type="submit" class="btn primario" id="btn-conectar">Conectar</button>
       </div>
+    </form>
+  </dialog>
+
+  <!-- ===== ABRIR EN EL MÓVIL (código QR con la llave) ===== -->
+  <dialog id="dlg-movil" class="dialogo">
+    <form method="dialog">
+      <h2>Abrir en el móvil</h2>
+      <p class="tenue">Escanea este código con la cámara del móvil. Se abrirá tu calendario ya conectado,
+        con tus notas, sin tener que escribir la llave.</p>
+      <img id="qr-movil" class="qr" alt="Código QR para abrir el calendario en el móvil">
+      <p class="aviso-qr">No enseñes este código a nadie: da acceso a tus notas.</p>
+      <p class="tenue">Para tenerlo como una app: en el móvil, menú del navegador → <b>Añadir a pantalla de inicio</b>.</p>
+      <div class="fila fin"><button class="btn primario">Hecho</button></div>
     </form>
   </dialog>
 

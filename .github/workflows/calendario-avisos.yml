@@ -1,0 +1,41 @@
+# Workflow REUTILIZABLE de los avisos del calendario.
+# No se ejecuta aquí: lo llama el repositorio privado de datos (WEBS) una vez al día.
+# Lee las notas de ese repositorio y manda los recordatorios al móvil con ntfy.
+name: Avisos del calendario (reutilizable)
+
+on:
+  workflow_call:
+    inputs:
+      prueba:
+        description: "Mandar un aviso de prueba aunque hoy no toque nada"
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      NTFY_TOPIC:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  avisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Descargar las notas (repositorio privado que llama)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: calendario
+
+      - name: Descargar el código (este repositorio público)
+        uses: actions/checkout@v4
+        with:
+          repository: HoJaiRu/hojairu.github.io
+          path: _codigo
+          sparse-checkout: calendario/avisos
+
+      - name: Mandar avisos
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python3 _codigo/calendario/avisos/avisos.py --notas calendario/notas.json ${{ inputs.prueba && '--prueba' || '' }}

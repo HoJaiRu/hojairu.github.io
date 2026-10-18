@@ -92,6 +92,7 @@ export function notasDe(claveDia) {
   return [...cumples.map((n) => ({ ...n, fecha: claveDia })), ...normales];
 }
 export const tieneLlave = () => !!llave;
+export const llaveActual = () => llave;
 
 export function guardarNota(nota) {
   const ahora = Date.now();

@@ -13,7 +13,8 @@ export const CONFIG = {
   },
 
   // Días hacia delante en los que buscar notas destacadas para la cuenta atrás
-  diasCuentaAtras: 90,
+  // Días antes de un cumpleaños en los que aparece en la cuenta atrás
+  diasCumpleCuentaAtras: 10,
 };
 
 // Categorías: el color de cada nota. Puedes cambiar nombres y colores, o añadir más.

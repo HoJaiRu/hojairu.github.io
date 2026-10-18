@@ -1,5 +1,5 @@
 // hoy.js - La tarjeta "Hoy" de arriba: el resumen matinal.
-// Saludo, lo que tienes hoy, los próximos eventos y la cuenta atrás (destacadas, cumpleaños, puente y fin de curso).
+// Saludo, lo que tienes hoy, los próximos eventos y la cuenta atrás (puentes, vacaciones y cumpleaños cercanos).
 
 import { CONFIG, CURSO } from "./config.js";
 import { clave, hoy, sumarDias, diasEntre, fechaLarga, diaLibre, desdeClave, proximoPuente, marcaCurso } from "./fechas.js";
@@ -38,19 +38,11 @@ export function pintarHoy() {
   const notasHoy = notasDe(kHoy);
 
   // Próximos: las 3 notas pendientes más cercanas (después de hoy)
-  // Cuenta atrás: las notas destacadas de los próximos días
-  const futuras = [], destacadas = [];
+  const futuras = [];
   for (let i = 1; i <= 366; i++) {
-    const k = clave(sumarDias(d0, i));
-    for (const n of notasDe(k)) {
-      if (n.hecha) continue;
-      futuras.push(n);
-      if ((n.destacada || n.cat === "cumple") && i <= CONFIG.diasCuentaAtras) destacadas.push(n);
-    }
+    for (const n of notasDe(clave(sumarDias(d0, i)))) if (!n.hecha) futuras.push(n);
   }
-  const porFecha = (a, b) => a.fecha.localeCompare(b.fecha) || (a.hora || "99").localeCompare(b.hora || "99");
-  futuras.sort(porFecha);
-  destacadas.sort(porFecha);
+  futuras.sort((a, b) => a.fecha.localeCompare(b.fecha) || (a.hora || "99").localeCompare(b.hora || "99"));
   const faltan = (n) => diasEntre(d0, desdeClave(n.fecha));
 
   $("#hoy-saludo").textContent = saludo();
@@ -60,19 +52,16 @@ export function pintarHoy() {
   $("#proximos-lista").innerHTML = futuras.slice(0, 3).map((n) => itemCuenta(n, faltan(n))).join("")
     || `<li class="tenue vacio">No hay nada anotado más adelante</li>`;
 
-  // En la cuenta atrás no se repite lo que ya sale en "Próximos"
-  const yaVistas = new Set(futuras.slice(0, 3).map((n) => n.id + n.fecha));
-  let cuenta = destacadas.filter((n) => !yaVistas.has(n.id + n.fecha)).slice(0, 4).map((n) => itemCuenta(n, faltan(n))).join("");
-  const puente = proximoPuente(d0);
-  if (puente) {
-    cuenta += `<li class="festivo-item"><span>${esc(puente.nombre)} · ${puente.dias} días libres</span>` +
-      `<b>${enDias(diasEntre(d0, puente.inicio))}</b></li>`;
+  // Cuenta atrás: los próximos puentes y vacaciones, y los cumpleaños de los próximos 10 días
+  const cuenta = [];
+  for (const n of futuras) {
+    if (n.cat === "cumple" && faltan(n) <= CONFIG.diasCumpleCuentaAtras) cuenta.push({ dias: faltan(n), html: itemCuenta(n, faltan(n)) });
   }
-  // Fin de clases del curso
-  if (CURSO && CURSO.fin > kHoy && CURSO.inicio <= kHoy) {
-    cuenta += `<li class="curso-item"><span>Fin de clases</span><b>${enDias(diasEntre(d0, desdeClave(CURSO.fin)))}</b></li>`;
+  for (const p of proximosDescansos(d0, 3)) {
+    cuenta.push({ dias: p.faltan, html: `<li class="festivo-item"><span>${esc(p.nombre)}${p.dias ? ` · ${p.dias} días libres` : ""}</span><b>${enDias(p.faltan)}</b></li>` });
   }
-  $("#cuenta-lista").innerHTML = cuenta || `<li class="tenue vacio">Destaca una nota (★) para verla aquí</li>`;
+  cuenta.sort((a, b) => a.dias - b.dias);
+  $("#cuenta-lista").innerHTML = cuenta.map((c) => c.html).join("") || `<li class="tenue vacio">No hay puentes a la vista</li>`;
 
   // Resumen de una línea, para cuando la tarjeta está plegada
   const pendientes = notasHoy.filter((n) => !n.hecha).length;
@@ -83,9 +72,26 @@ export function pintarHoy() {
   return tarjeta;
 }
 
+// Los próximos "cuantos" puentes o vacaciones, incluidas las de verano (al acabar el curso)
+function proximosDescansos(d0, cuantos) {
+  const lista = [];
+  let desde = d0;
+  for (let i = 0; i < cuantos; i++) {
+    const p = proximoPuente(desde);
+    if (!p) break;
+    lista.push({ nombre: p.nombre, dias: p.dias, faltan: diasEntre(d0, p.inicio) });
+    desde = sumarDias(p.inicio, p.dias - 1);
+  }
+  if (CURSO && CURSO.fin >= clave(d0)) {
+    const verano = sumarDias(desdeClave(CURSO.fin), 1);
+    lista.push({ nombre: "Vacaciones de verano", dias: 0, faltan: diasEntre(d0, verano) });
+  }
+  return lista.sort((a, b) => a.faltan - b.faltan).slice(0, cuantos);
+}
+
 function itemCuenta(n, dias) {
   return `<li><button class="mini-nota cuenta" data-fecha="${n.fecha}" style="--c:${colorDe(n.cat)}">` +
-    `<i></i><span>${esc(n.texto)}</span><b>${enDias(dias)}</b></button></li>`;
+    `<i></i><span>${n.cat === "cumple" ? "🎂 " : ""}${esc(n.texto)}</span><b>${enDias(dias)}</b></button></li>`;
 }
 
 export function iniciarHoy(alPulsarFecha) {

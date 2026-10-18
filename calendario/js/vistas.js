@@ -10,10 +10,14 @@ const colorDe = (catId) => (CATEGORIAS.find((c) => c.id === catId) || CATEGORIAS
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-// Color con el que se "tiñe" un día: el de su primera nota destacada o cumpleaños (si tiene)
-function tinteDelDia(notas) {
-  const d = notas.find((n) => n.destacada || n.cat === "cumple");
-  return d ? colorDe(d.cat) : "";
+// Color con el que se "tiñe" un día. Las notas mandan sobre festivos y vacaciones:
+//  - "tenido": tiene un cumpleaños o una nota destacada (color fuerte)
+//  - "tenido-suave": es festivo o sin clase pero tiene alguna nota (color de la nota, suave)
+function tinteDelDia(notas, d) {
+  const fuerte = notas.find((n) => n.destacada || n.cat === "cumple");
+  if (fuerte) return { color: colorDe(fuerte.cat), clase: " tenido" };
+  if (notas.length && diaLibre(d)) return { color: colorDe(notas[0].cat), clase: " tenido-suave" };
+  return { color: "", clase: "" };
 }
 
 function clasesDia(d, mes, seleccion) {
@@ -50,15 +54,15 @@ export function vistaMes(anio, mes, seleccion) {
     const nl = noLectivo(d);
     const fest = festivo(d) || marcaCurso(d) ||
       (nl && (nl !== noLectivo(sumarDias(d, -1)) || d.getDay() === 1 || d.getDate() === 1) ? nl : "");
-    const tinte = tinteDelDia(notas);
+    const tinte = tinteDelDia(notas, d);
     const chips = notas.slice(0, 3).map((n) =>
       `<span class="chip${n.hecha ? " hecha" : ""}" style="--c:${colorDe(n.cat)}">` +
       `${n.cat === "cumple" ? "🎂 " : ""}${n.hora ? `<em>${esc(n.hora)}</em> ` : ""}${esc(n.texto)}</span>`).join("");
     const mas = notas.length > 3 ? `<span class="chip-mas">+${notas.length - 3} más</span>` : "";
     const etiqueta = `${d.getDate()} de ${MESES[d.getMonth()]}${fest ? ", " + fest : ""}` +
       (notas.length ? `, ${notas.length} nota${notas.length > 1 ? "s" : ""}` : "");
-    return `<button class="${clasesDia(d, mes, seleccion)}${tinte ? " tenido" : ""}" data-fecha="${k}"` +
-      `${tinte ? ` style="--tinte:${tinte}"` : ""} aria-label="${esc(etiqueta)}">` +
+    return `<button class="${clasesDia(d, mes, seleccion)}${tinte.clase}" data-fecha="${k}"` +
+      `${tinte.color ? ` style="--tinte:${tinte.color}"` : ""} aria-label="${esc(etiqueta)}">` +
       `<span class="num">${d.getDate()}</span>` +
       (fest ? `<span class="nombre-festivo" title="${esc(fest)}">${esc(fest)}</span>` : "") +
       `<span class="chips">${chips}${mas}</span>` +
@@ -80,9 +84,9 @@ function miniMes(anio, mes, seleccion, modo) {
       const nivel = Math.min(notas.length, 4);
       extra = nivel ? ` data-calor="${nivel}"` : "";
     }
-    const tinte = tinteDelDia(notas);
-    return `<button class="${clasesDia(d, mes, seleccion)} mini-dia${tinte ? " tenido" : ""}" data-fecha="${k}"${extra}` +
-      `${tinte ? ` style="--tinte:${tinte}"` : ""} title="${esc(diaLibre(d) || marcaCurso(d))}" aria-label="${d.getDate()} de ${MESES[mes]}">` +
+    const tinte = tinteDelDia(notas, d);
+    return `<button class="${clasesDia(d, mes, seleccion)} mini-dia${tinte.clase}" data-fecha="${k}"${extra}` +
+      `${tinte.color ? ` style="--tinte:${tinte.color}"` : ""} title="${esc(diaLibre(d) || marcaCurso(d))}" aria-label="${d.getDate()} de ${MESES[mes]}">` +
       `<span class="num">${d.getDate()}</span>` +
       (modo === "puntos" && notas.length ? puntos(notas, 3) : "") +
       `</button>`;

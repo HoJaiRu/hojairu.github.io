@@ -114,6 +114,7 @@ function pintarSync() {
   $('[data-accion="conectar"]').hidden = conectado;
   $('[data-accion="sincronizar"]').hidden = !conectado;
   $('[data-accion="desconectar"]').hidden = !conectado;
+  $('[data-accion="movil"]').hidden = !conectado;
   if (modo === "error") avisar(texto);
 }
 
@@ -143,6 +144,15 @@ const acciones = {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   },
   importar: () => $("#archivo-importar").click(),
+  // Código QR con un enlace que lleva la llave detrás de "#": esa parte nunca se envía a ningún servidor
+  movil: async () => {
+    const { default: qrcode } = await import("./lib/qrcode.mjs");
+    const qr = qrcode(0, "M");
+    qr.addData(`${location.origin}${location.pathname}#llave=${encodeURIComponent(almacen.llaveActual())}`);
+    qr.make();
+    $("#qr-movil").src = qr.createDataURL(6, 3);
+    $("#dlg-movil").showModal();
+  },
 };
 
 function pintarIconoTema() {
@@ -251,7 +261,7 @@ function iniciar() {
   // Atajos de teclado
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      if ($("#dlg-llave").open) return;
+      if ($("#dlg-llave").open || $("#dlg-movil").open) return;
       if (!$("#menu").hidden) return alternarMenu(false);
       return cerrarPanel();
     }
@@ -279,6 +289,20 @@ function iniciar() {
   }, 60000);
 
   pintar();
+  conectarDesdeEnlace();
+}
+
+// Si se abre con el enlace del código QR (…/calendario/#llave=…), se conecta solo
+async function conectarDesdeEnlace() {
+  const m = location.hash.match(/^#llave=(.+)$/);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname);   // borra la llave de la barra de direcciones
+  try {
+    await almacen.conectar(decodeURIComponent(m[1]));
+    avisar("Conectado: ya ves tus notas en este dispositivo");
+  } catch (err) {
+    avisar("No se pudo conectar: " + err.message);
+  }
 }
 
 iniciar();
