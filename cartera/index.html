@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://api.github.com https://api.binance.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0f0f12">
+  <title>Cartera</title>
+  <link rel="icon" href="icono.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Cartera">
+  <script src="../comun/tema.js"></script>
+  <link rel="stylesheet" href="../comun/base.css">
+  <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+  <!-- ===== BARRA DE ARRIBA ===== -->
+  <header class="barra">
+    <div class="barra-lado">
+      <a class="volver" href="../" title="Mis webs" aria-label="Mis webs">◂</a>
+      <span class="marca">Cartera</span>
+    </div>
+    <div class="barra-lado der">
+      <button id="sync" class="sync" title="Solo en este navegador"><i></i><span>Local</span></button>
+      <button id="btn-ojo" class="btn-icono" title="Ocultar importes (H)" aria-label="Ocultar importes" aria-pressed="false"></button>
+      <button id="btn-tema" class="btn-icono" title="Modo claro / oscuro" aria-label="Cambiar tema"></button>
+      <div class="menu-envoltura">
+        <button id="btn-menu" class="btn-icono" title="Más opciones" aria-label="Más opciones" aria-expanded="false">⋯</button>
+        <div id="menu" class="menu" hidden>
+          <button data-accion="conectar">Sincronizar con GitHub…</button>
+          <button data-accion="actualizar" hidden>Actualizar precios ahora</button>
+          <button data-accion="exportar">Descargar copia de seguridad</button>
+          <button data-accion="importar">Cargar copia de seguridad…</button>
+          <button data-accion="desconectar" class="peligro" hidden>Desconectar este navegador</button>
+          <hr>
+          <p class="menu-ayuda">Atajos: N nueva operación · H ocultar importes</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- ===== BIENVENIDA (solo si aún no hay nada) ===== -->
+    <section id="bienvenida" class="bienvenida" hidden>
+      <h1>Tu cartera, de un vistazo</h1>
+      <p class="tenue">Apunta tus compras y la web calcula cuánto vale todo, cuánto ganas o pierdes y cómo está repartido.
+        Los precios se actualizan solos.</p>
+      <div class="fila centro">
+        <button class="btn primario" data-accion="nueva">Añadir primera compra</button>
+        <button class="btn" data-accion="conectar" id="btn-bienvenida-conectar">Conectar GitHub</button>
+      </div>
+      <p class="tenue pequeno">Tus datos se guardan en este navegador y, si conectas GitHub, en tu repositorio privado. Nadie más los ve.</p>
+    </section>
+
+    <div id="contenido" hidden>
+      <!-- ===== RESUMEN ===== -->
+      <section class="resumen">
+        <p class="etiqueta">Valor de la cartera</p>
+        <h1 id="valor" class="valor">—</h1>
+        <div class="cifras">
+          <span class="cifra"><small>Total</small><b id="ganancia">—</b></span>
+          <span class="cifra"><small>Hoy</small><b id="hoy">—</b></span>
+        </div>
+        <p class="estado-precios">
+          <span id="precios-estado" class="tenue"></span>
+          <button id="btn-actualizar" class="btn-actualizar" title="Pedir precios nuevos al robot" aria-label="Actualizar precios">↻</button>
+        </p>
+      </section>
+
+      <!-- ===== GRÁFICO DE EVOLUCIÓN ===== -->
+      <section class="tarjeta">
+        <div class="tarjeta-cab">
+          <div class="leyenda-lineas">
+            <span><i class="marca-valor"></i>Valor</span>
+            <span><i class="marca-invertido"></i>Invertido</span>
+          </div>
+          <div class="segmentos" id="rangos" role="tablist" aria-label="Periodo">
+            <button role="tab" data-rango="30">1M</button>
+            <button role="tab" data-rango="91">3M</button>
+            <button role="tab" data-rango="365">1A</button>
+            <button role="tab" data-rango="0">Todo</button>
+          </div>
+        </div>
+        <div id="grafico" class="grafico"></div>
+      </section>
+
+      <!-- ===== POSICIONES ===== -->
+      <section class="bloque">
+        <h2>Posiciones <span id="num-posiciones" class="tenue"></span></h2>
+        <ul id="posiciones" class="posiciones"></ul>
+      </section>
+
+      <!-- ===== DESPLEGABLES ===== -->
+      <details class="plegable" id="det-reparto">
+        <summary>Reparto <span class="flechita" aria-hidden="true">⌄</span></summary>
+        <div class="plegable-cuerpo">
+          <div class="segmentos pequeno" id="modo-reparto" role="tablist" aria-label="Reparto">
+            <button role="tab" data-modo="tipo">Por tipo</button>
+            <button role="tab" data-modo="valor">Por valor</button>
+          </div>
+          <div id="quesito" class="quesito"></div>
+        </div>
+      </details>
+
+      <details class="plegable" id="det-resultados">
+        <summary>Resultados por año <span class="flechita" aria-hidden="true">⌄</span></summary>
+        <div class="plegable-cuerpo">
+          <p class="tenue pequeno">Lo ganado o perdido al <b>vender</b> y los dividendos cobrados. Útil para la declaración de la renta.</p>
+          <table class="tabla" id="tabla-resultados"></table>
+        </div>
+      </details>
+
+      <details class="plegable" id="det-operaciones">
+        <summary>Operaciones <span id="num-operaciones" class="tenue"></span> <span class="flechita" aria-hidden="true">⌄</span></summary>
+        <div class="plegable-cuerpo">
+          <ul id="operaciones" class="operaciones"></ul>
+        </div>
+      </details>
+    </div>
+  </main>
+
+  <button id="btn-nueva" class="fab" title="Nueva operación (N)" aria-label="Nueva operación" hidden>+</button>
+
+  <!-- ===== NUEVA / EDITAR OPERACIÓN ===== -->
+  <dialog id="dlg-op" class="dialogo">
+    <form id="form-op" autocomplete="off">
+      <h2 id="op-titulo">Nueva operación</h2>
+      <div class="segmentos ancho" id="op-tipo" role="radiogroup" aria-label="Tipo de operación">
+        <button type="button" data-tipo="compra">Compra</button>
+        <button type="button" data-tipo="venta">Venta</button>
+        <button type="button" data-tipo="dividendo">Dividendo</button>
+      </div>
+
+      <label class="campo">
+        <span>Valor <a class="ayuda" href="https://finance.yahoo.com/lookup" target="_blank" rel="noopener">buscar símbolo ↗</a></span>
+        <input id="op-ticker" list="lista-tickers" placeholder="AAPL, SAN.MC, IWDA.AS, BTC-EUR…" required spellcheck="false" autocapitalize="characters">
+        <datalist id="lista-tickers"></datalist>
+      </label>
+
+      <div id="op-nuevo" class="fila-campos" hidden>
+        <label class="campo"><span>Nombre <small class="tenue">(opcional)</small></span><input id="op-nombre" placeholder="Apple"></label>
+        <label class="campo"><span>Tipo</span>
+          <select id="op-clase">
+            <option value="accion">Acción</option>
+            <option value="etf">ETF</option>
+            <option value="fondo">Fondo</option>
+            <option value="cripto">Cripto</option>
+            <option value="otro">Otro</option>
+          </select>
+        </label>
+      </div>
+
+      <label class="campo"><span>Fecha</span><input id="op-fecha" type="date" required></label>
+
+      <div id="op-compraventa" class="fila-campos">
+        <label class="campo"><span>Cantidad</span><input id="op-cantidad" type="number" step="any" min="0" inputmode="decimal" placeholder="10"></label>
+        <label class="campo"><span>Precio por unidad</span>
+          <span class="con-divisa">
+            <input id="op-precio" type="number" step="any" min="0" inputmode="decimal" placeholder="150">
+            <select id="op-divisa" aria-label="Moneda">
+              <option>EUR</option><option>USD</option><option>GBP</option><option>CHF</option>
+            </select>
+          </span>
+        </label>
+        <label class="campo"><span>Comisión (€)</span><input id="op-comision" type="number" step="any" min="0" inputmode="decimal" placeholder="0"></label>
+      </div>
+
+      <label class="campo" id="op-dividendo" hidden><span>Importe cobrado (€, neto)</span>
+        <input id="op-importe" type="number" step="any" min="0" inputmode="decimal" placeholder="12,50">
+      </label>
+
+      <p id="op-total" class="op-total tenue"></p>
+      <p id="op-error" class="error" hidden></p>
+
+      <div class="fila fin">
+        <button type="button" class="btn-texto peligro-texto" id="btn-borrar-op" hidden>Borrar</button>
+        <span class="hueco"></span>
+        <button type="button" class="btn" id="btn-cancelar-op">Cancelar</button>
+        <button type="submit" class="btn primario">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ===== PRECIO A MANO (si el robot no encuentra un valor) ===== -->
+  <dialog id="dlg-manual" class="dialogo">
+    <form id="form-manual">
+      <h2>Precio a mano</h2>
+      <p class="tenue">Para valores que el robot no encuentra (por ejemplo, algunos fondos). Se usa hasta que haya un precio automático.</p>
+      <label class="campo"><span id="manual-etiqueta">Precio por unidad</span><input id="manual-precio" type="number" step="any" min="0" inputmode="decimal" required></label>
+      <div class="fila fin">
+        <button type="button" class="btn" id="btn-cancelar-manual">Cancelar</button>
+        <button type="submit" class="btn primario">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ===== CONECTAR CON GITHUB ===== -->
+  <dialog id="dlg-llave" class="dialogo">
+    <form id="form-llave">
+      <h2>Sincronizar con GitHub</h2>
+      <p class="tenue">Tu cartera se guardará también en tu repositorio <b>privado</b> WEBS, para verla en el PC y en el móvil,
+        y el robot podrá traer los precios. Pega tu llave de GitHub (la misma del Vigilante y el Calendario).
+        Solo se guarda en este navegador.</p>
+      <input id="llave" type="password" placeholder="github_pat_…" spellcheck="false" required>
+      <p id="llave-error" class="error" hidden></p>
+      <div class="fila fin">
+        <button type="button" class="btn" id="btn-cancelar-llave">Cancelar</button>
+        <button type="submit" class="btn primario">Conectar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <input type="file" id="archivo-importar" accept=".json,application/json" hidden>
+  <div id="aviso" class="aviso" role="status" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

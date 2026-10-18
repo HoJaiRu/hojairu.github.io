@@ -1,0 +1,63 @@
+# Workflow REUTILIZABLE del robot de la cartera.
+# No se ejecuta aquí: lo llama el repositorio privado de datos (WEBS).
+# Corre dentro del repositorio que lo llama: lee su cartera, trae los precios
+# y los guarda en la rama "cotizaciones" de ese mismo repositorio. El código se coge de aquí.
+name: Cotizar cartera (reutilizable)
+
+on:
+  workflow_call:
+    inputs:
+      prueba:
+        description: "Símbolos de prueba separados por comas (solo muestra precios, no guarda)"
+        type: string
+        required: false
+        default: ""
+
+jobs:
+  cotizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Descargar la cartera (repositorio privado que llama)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: cartera
+
+      - name: Descargar el código (este repositorio público)
+        uses: actions/checkout@v4
+        with:
+          repository: HoJaiRu/hojairu.github.io
+          path: _codigo
+          sparse-checkout: cartera/robot
+
+      - name: Traer precios
+        env:
+          PRUEBA: ${{ inputs.prueba }}
+        run: |
+          if [ -n "$PRUEBA" ]; then
+            python3 _codigo/cartera/robot/cotizar.py --prueba "$PRUEBA"
+            exit 0
+          fi
+          # Los precios de la vez anterior, por si Yahoo falla con algún valor
+          git fetch -q --depth 1 origin cotizaciones 2>/dev/null \
+            && git show FETCH_HEAD:cartera/cotizaciones.json > "$RUNNER_TEMP/anterior.json" 2>/dev/null || true
+          python3 _codigo/cartera/robot/cotizar.py --datos cartera \
+            --anterior "$RUNNER_TEMP/anterior.json" --salida "$RUNNER_TEMP/cotizaciones.json"
+
+      # La rama "cotizaciones" solo tiene un commit, que se reemplaza cada vez:
+      # así el historial de main queda limpio aunque el robot corra muchas veces al día.
+      - name: Guardar en la rama cotizaciones
+        if: inputs.prueba == ''
+        env:
+          TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          [ -f "$RUNNER_TEMP/cotizaciones.json" ] || exit 0
+          mkdir -p "$RUNNER_TEMP/salida/cartera"
+          cp "$RUNNER_TEMP/cotizaciones.json" "$RUNNER_TEMP/salida/cartera/"
+          cd "$RUNNER_TEMP/salida"
+          git init -q -b cotizaciones
+          git add cartera
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "cartera: cotizaciones $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -fq "https://x-access-token:${TOKEN}@github.com/${REPO}.git" cotizaciones

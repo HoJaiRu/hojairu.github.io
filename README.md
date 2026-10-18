@@ -15,6 +15,8 @@ hojairu.github.io/
 │   ├── tema.js           Botón de modo oscuro / claro
 │   └── portada.*         Estilo y botón de la portada
 ├── calendario/           Calendario y resumen matinal
+├── cartera/              Seguimiento de la cartera de bolsa
+│   └── robot/            El que trae los precios (Python) que ejecuta GitHub Actions
 ├── precios/              Vigilante de precios
 │   └── vigilante/        El lector de precios (Python) que ejecuta GitHub Actions
 └── .github/workflows/    Tareas automáticas (GitHub obliga a que estén aquí)
@@ -30,7 +32,7 @@ crear la misma carpeta en el repositorio privado `WEBS`.
 |---|---|---|
 | Calendario | https://hojairu.github.io/calendario/ | `WEBS/calendario/` — ver [calendario/README.md](calendario/README.md) |
 | Vigilante de precios | https://hojairu.github.io/precios/ | `WEBS/precios/` y `precios-perfil2` |
-| Cartera | — | Pendiente |
+| Cartera | https://hojairu.github.io/cartera/ | `WEBS/cartera/` — ver [cartera/README.md](cartera/README.md) |
 
 ## Vigilante de precios
 
