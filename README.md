@@ -45,7 +45,7 @@ Cada uno tiene `precios/productos.json`, `precios/datos/` y un workflow pequeño
 
 **IA (Gemini):** `precios/vigilante/ia.py`. Busca tiendas a partir del nombre del producto, averigua los
 gastos de envío a España y clasifica si cada enlace es el mismo producto. Los precios los lee el lector
-(`scraper.py`); la IA solo lee un precio como último recurso, y ese fallo del lector se sigue viendo en la zona de errores. Necesita el secreto `GEMINI_API_KEY` en cada repositorio de datos; sin él todo funciona igual, pero sin IA.
+(`scraper.py`); la IA solo lee un precio como último recurso, y esos enlaces salen con la etiqueta ✨ IA (a la zona de errores solo van los que nadie puede leer). Necesita el secreto `GEMINI_API_KEY` en cada repositorio de datos; sin él todo funciona igual, pero sin IA.
 El precio que se compara es el **total en euros** (precio convertido con el cambio del BCE + envío).
 
 **Añadir otro perfil:** crear un repositorio privado con la misma estructura y añadirlo a `PERFILES` en `precios/app.js`.

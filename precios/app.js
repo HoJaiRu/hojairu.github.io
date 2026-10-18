@@ -503,8 +503,9 @@ async function cargarBusqueda(id) {
 }
 
 function pintarErrores() {
-  // Fallos del lector: también los que luego ha salvado la IA (último recurso)
-  const errores = productos.flatMap((p) => p.enlaces.filter((e) => e.error || e.aviso_lector).map((e) => ({ p, e })));
+  // Solo los enlaces sin precio. Los que el lector no puede pero la IA sí (Carrefour, PcComponentes...)
+  // salen normales en su tabla con la etiqueta ✨ IA (decisión del usuario, 2026-10-18)
+  const errores = productos.flatMap((p) => p.enlaces.filter((e) => e.error).map((e) => ({ p, e })));
   // Avisos de la IA: enlaces que quizá no son el mismo producto
   const dudas = productos.flatMap((p) => p.enlaces
     .filter((e) => !e.error && (e.veredicto === "no" || e.veredicto === "variante")).map((e) => ({ p, e })));
@@ -512,8 +513,7 @@ function pintarErrores() {
   const htmlErrores = errores.map(({ p, e }) => `
         <div class="error-item">
           <div><div class="prod" data-ir="${esc(p.id)}">${esc(p.nombre)}</div><div class="tenue">${esc(e.tienda)} · ${hace(e.ultima_lectura)}</div></div>
-          <div><div class="motivo">${esc(e.error || e.aviso_lector)}</div>
-            ${!e.error && e.aviso_lector ? `<div class="rescate">✨ La IA ha leído el precio como último recurso: ${dinero(e.precio, e.moneda)}. Revísalo en la tienda.</div>` : ""}
+          <div><div class="motivo">${esc(e.error)}</div>
             <div class="url">${esc(e.url)}</div></div>
           <a class="btn" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">Abrir ↗</a>
         </div>`).join("");

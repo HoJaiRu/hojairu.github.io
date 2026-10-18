@@ -5,7 +5,7 @@ Solo funciona si el repositorio de datos tiene el secreto GEMINI_API_KEY.
 Sin él, el vigilante funciona igual que siempre, pero sin las funciones de IA.
 
 Los precios los lee el lector (scraper.py). La IA solo lee un precio como ÚLTIMO RECURSO, cuando el
-lector falla, y ese fallo se sigue mostrando en la zona de errores de la web.
+lector falla; la web marca esos enlaces con la etiqueta ✨ IA.
 
 Funciones:
   interpretar()      Entiende el nombre que escribes (aunque esté incompleto) y prepara la búsqueda

@@ -14,7 +14,7 @@ Con el secreto GEMINI_API_KEY, además usa la IA (ver ia.py) para:
   - buscar tiendas a partir del nombre del producto (--accion buscar)
   - clasificar cada enlace (¿es el mismo producto?) y averiguar los gastos de envío
   - leer el precio como ÚLTIMO RECURSO cuando el lector (scraper.py) falla. El fallo del lector
-    se guarda igualmente en "aviso_lector" y la web lo sigue mostrando en la zona de errores.
+    se guarda en "aviso_lector" y la web marca el enlace con la etiqueta ✨ IA.
 """
 import argparse
 import json
