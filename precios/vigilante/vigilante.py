@@ -38,8 +38,10 @@ PAUSA_ENTRE_ENLACES = (2, 5)   # segundos, para no saturar a las tiendas
 DIAS_HISTORIAL = 365           # se borra lo más antiguo
 NUEVO_PUNTO_CADA_HORAS = 20    # aunque el precio no cambie, guarda un punto al día
 DIAS_ENVIO_IA = 7              # cada cuánto se vuelven a consultar los gastos de envío
-MAX_CANDIDATOS = 10            # tiendas que se comprueban en cada búsqueda
-MAX_RESCATES_BUSQUEDA = 3      # páginas que la IA lee en cada búsqueda si el lector no puede
+MAX_CANDIDATOS = 18            # tiendas que se prueban como mucho en cada búsqueda
+MAX_VERIFICADOS = 12           # se para al tener tantas tiendas con precio
+FICHAS_POR_TIENDA = 2          # si la ficha de una tienda falla (404...), se prueba otra de la misma tienda
+MAX_RESCATES_BUSQUEDA = 5      # páginas que la IA lee en cada búsqueda si el lector no puede
 
 
 def ahora():
@@ -232,8 +234,8 @@ def revisar_con_ia(productos, estado, solo):
                 interp = leer(BUSQUEDAS / f"{p['id']}.json", {}).get("interpretado") or {}
                 res = ia.revisar_enlaces(interp.get("producto") or p["nombre"],
                                          " · ".join(x for x in (p.get("descripcion", ""), interp.get("claves")) if x), [
-                    {"id": en["id"], "tienda": e.get("tienda"), "titulo": e.get("titulo"),
-                     "precio": e.get("precio"), "moneda": e.get("moneda")} for en, e in leidos])
+                    {"id": en["id"], "tienda": e.get("tienda"), "titulo": e.get("titulo"), "url": en["url"],
+                     "precio": e.get("precio"), "moneda": e.get("moneda")} for en, e in leidos], escrito=p["nombre"])
                 for en, e in pendientes:
                     if en["id"] in res:
                         e["coincide"] = {**res[en["id"]], "titulo": e.get("titulo")}
@@ -333,18 +335,35 @@ def limpiar_url(url):
     return urlunparse(p._replace(query=query, fragment=""))
 
 
-def buscar_plan_b(nombre, detalles):
+def buscar_en_buscador(nombre, consulta, detalles, tiendas):
+    """Buscador normal (DuckDuckGo/Bing): búsqueda general y otra solo en las tiendas típicas.
+    La IA elige qué resultados son fichas de producto (no inventa enlaces)."""
+    # Primero en las tiendas típicas (DuckDuckGo entiende "site:a OR site:b"), luego en general
+    consultas = [f"{consulta} (" + " OR ".join(f"site:{t}" for t in tiendas[i:i + 4]) + ")"
+                 for i in range(0, min(len(tiendas), 12), 4)]
+    consultas += [f"{consulta} comprar", f"{consulta} precio"]
     resultados, vistos = [], set()
-    for consulta in (f"{nombre} comprar", f"{nombre} precio tienda"):
-        for r in scraper.buscar_en_web(consulta):
+    for q in consultas:
+        for r in scraper.buscar_en_web(q):
             if clave_url(r["url"]) not in vistos:
                 vistos.add(clave_url(r["url"]))
                 resultados.append(r)
-        time.sleep(2)
+        time.sleep(1.5)
     print(f"  El buscador devuelve {len(resultados)} resultados")
     if not resultados:
         raise ia.ErrorIA("el buscador web no ha devuelto resultados")
-    return ia.elegir_resultados(nombre, detalles, resultados[:30])
+    # Primero los de tiendas típicas, para que no se queden fuera
+    resultados.sort(key=lambda r: not es_tipica(r["url"], tiendas))
+    return ia.elegir_resultados(nombre, detalles, resultados[:45])
+
+
+def host_de(url):
+    return (urlparse(url).hostname or "").lower().removeprefix("www.")
+
+
+def es_tipica(url, tiendas):
+    h = host_de(url)
+    return any(h == t or h.endswith("." + t) for t in tiendas)
 
 
 def buscar(producto):
@@ -355,21 +374,25 @@ def buscar(producto):
                         fin=iso(ahora()), uso_ia={"fecha": hoy(), "consultas": 0})
         return registro
     # 1. Entender lo que ha escrito el usuario ("diesel only the brave" -> producto exacto)
-    nombre, detalles = producto["nombre"], producto.get("descripcion", "")
+    #    y cuáles son las tiendas típicas de ese tipo de producto
+    nombre, detalles, tiendas = producto["nombre"], producto.get("descripcion", ""), []
     try:
         interpretado = ia.interpretar(nombre, detalles)
-        registro["interpretado"] = interpretado
+        tiendas = interpretado.pop("tiendas", [])
+        registro["interpretado"] = {**interpretado, "tiendas": tiendas}
         nombre = interpretado["producto"] or nombre
         detalles = " · ".join(x for x in (detalles, interpretado["claves"]) if x)
         consulta = interpretado["consulta"] or nombre
     except ia.ErrorIA as e:
         print(f"  (no se pudo interpretar el nombre: {e})")
         consulta = nombre
-    print(f"Buscando tiendas para «{nombre}» (consulta: {consulta})...")
+    print(f"Buscando tiendas para «{nombre}» (consulta: {consulta}; típicas: {', '.join(tiendas)})...")
 
-    # 2. Búsqueda de Google con la IA y, si encuentra poco, también el buscador normal
+    # 2. Buscar a la vez con Google (IA) y con el buscador normal (general + tiendas típicas).
+    #    Se guardan varias fichas por tienda: si la primera no vale (404...), se prueba la siguiente.
     ya = {clave_url(en["url"]) for en in producto.get("enlaces", [])}
-    hosts_ya, candidatos = set(), []
+    hosts_producto = {host_de(en["url"]) for en in producto.get("enlaces", [])}
+    por_tienda = {}
     traza = registro["traza"] = {}
 
     def anadir(encontrados):
@@ -380,72 +403,80 @@ def buscar(producto):
                 if not url:
                     continue
             url = limpiar_url(url)
-            host = (urlparse(url).hostname or "").lower().removeprefix("www.")
-            if clave_url(url) in ya or host in hosts_ya or len(urlparse(url).path) < 3:
+            host = host_de(url)
+            if clave_url(url) in ya or host in hosts_producto or len(urlparse(url).path) < 3 \
+                    or any(n in host for n in scraper.NO_TIENDAS):
                 continue
-            hosts_ya.add(host)          # una ficha por tienda
-            candidatos.append({**c, "url": url})
+            fichas = por_tienda.setdefault(host, [])
+            if all(clave_url(f["url"]) != clave_url(url) for f in fichas):
+                fichas.append({**c, "url": url})
 
-    try:
-        encontrados = ia.buscar_tiendas(consulta, detalles)
-        traza["google"] = len(encontrados)
-        anadir(encontrados)
-    except ia.ErrorIA as e:
-        traza["google"] = f"error: {str(e)[:150]}"
-    if len(candidatos) < 4:
-        print(f"  Solo {len(candidatos)} tiendas con Google; pruebo también el buscador normal")
-        traza["respuesta_google"] = ia.ultima_respuesta[:300]
+    errores = []
+    for fuente, buscar_fuente in (("google", lambda: ia.buscar_tiendas(consulta, detalles, tiendas)),
+                                  ("buscador", lambda: buscar_en_buscador(nombre, consulta, detalles, tiendas))):
         try:
-            encontrados = buscar_plan_b(consulta, detalles)
-            traza["buscador"] = len(encontrados)
+            encontrados = buscar_fuente()
+            traza[fuente] = len(encontrados)
             anadir(encontrados)
         except ia.ErrorIA as e:
-            traza["buscador"] = f"error: {str(e)[:150]}"
-    if not candidatos and isinstance(traza.get("google"), str) and isinstance(traza.get("buscador"), str):
-        registro.update(error=f"La IA no pudo buscar: {traza['google'][7:]}", fin=iso(ahora()),
+            traza[fuente] = f"error: {str(e)[:150]}"
+            errores.append(str(e))
+    if not por_tienda and len(errores) == 2:
+        registro.update(error=f"La IA no pudo buscar: {errores[0][:150]}", fin=iso(ahora()),
                         problemas=ia.diagnostico, uso_ia={"fecha": hoy(), "consultas": ia.llamadas()})
         return registro
-    candidatos = candidatos[:MAX_CANDIDATOS]
-    print(f"  La IA propone {len(candidatos)} tiendas; compruebo cada una")
+    # Primero las tiendas típicas (en el orden de la IA), luego el resto
+    orden = sorted(por_tienda, key=lambda h: next((i for i, t in enumerate(tiendas)
+                                                   if h == t or h.endswith("." + t)), len(tiendas)))
+    traza["tiendas"] = len(orden)
+    print(f"  Hay {len(orden)} tiendas candidatas; compruebo cada una")
 
-    verificados, rescates = [], 0
-    for i, c in enumerate(candidatos):
-        if i:
-            time.sleep(random.uniform(1, 3))
-        try:
-            d, fallo_lector = leer_enlace(c["url"], permitir_ia=rescates < MAX_RESCATES_BUSQUEDA)
-        except scraper.ErrorLectura as e:
-            if e.tipo in ("sin_precio", "bloqueo", "http"):
+    # 3. Comprobar cada tienda con el lector (la IA solo lee si el lector no puede, con tope)
+    verificados, descartes, rescates = [], [], 0
+    for host in orden[:MAX_CANDIDATOS]:
+        if len(verificados) >= MAX_VERIFICADOS:
+            break
+        for c in por_tienda[host][:FICHAS_POR_TIENDA]:
+            time.sleep(random.uniform(1, 2))
+            try:
+                d, fallo_lector = leer_enlace(c["url"], permitir_ia=rescates < MAX_RESCATES_BUSQUEDA)
+            except scraper.ErrorLectura as e:
+                if e.tipo in ("sin_precio", "bloqueo", "http"):
+                    rescates += 1
+                print(f"  ✗ {c['url'][:80]}: {e}")
+                descartes.append({"url": c["url"], "motivo": str(e)[:120]})
+                continue
+            except Exception as e:
+                print(f"  ✗ {c['url'][:80]}: {type(e).__name__}")
+                descartes.append({"url": c["url"], "motivo": type(e).__name__})
+                continue
+            if fallo_lector:
                 rescates += 1
-            print(f"  ✗ {c['url'][:80]}: {e}")
-            registro["descartados"] += 1
-            continue
-        except Exception as e:
-            print(f"  ✗ {c['url'][:80]}: {type(e).__name__}")
-            registro["descartados"] += 1
-            continue
-        if fallo_lector:
-            rescates += 1
-        envio = d.get("envio") or c.get("envio")
-        cand = {"id": f"c{i}", "url": c["url"], "tienda": scraper.nombre_tienda(c["url"]),
-                "pais": c.get("pais"), "titulo": d.get("titulo"), "imagen": d.get("imagen"),
-                "precio": d["precio"], "moneda": d["moneda"], "stock": d.get("stock"),
-                "envio": envio, "fuente": "IA" if fallo_lector else "lector", "aviso_lector": fallo_lector}
-        calcular_totales(cand, {})
-        verificados.append(cand)
-        print(f"  ✓ {cand['tienda']}: {cand['precio']} {cand['moneda']}")
+            envio = d.get("envio") or c.get("envio")
+            cand = {"id": f"c{len(verificados)}", "url": c["url"], "tienda": scraper.nombre_tienda(c["url"]),
+                    "pais": c.get("pais"), "titulo": d.get("titulo"), "imagen": d.get("imagen"),
+                    "precio": d["precio"], "moneda": d["moneda"], "stock": d.get("stock"),
+                    "envio": envio, "fuente": "IA" if fallo_lector else "lector", "aviso_lector": fallo_lector,
+                    "tipica": es_tipica(c["url"], tiendas)}
+            calcular_totales(cand, {})
+            verificados.append(cand)
+            print(f"  ✓ {cand['tienda']}: {cand['precio']} {cand['moneda']}")
+            break
+    registro["descartados"] = len(descartes)
+    registro["descartes"] = descartes
 
+    # 4. ¿Es el mismo producto?
     if verificados:
         try:
-            revision = ia.revisar_enlaces(nombre, detalles, verificados)
+            revision = ia.revisar_enlaces(nombre, detalles, verificados, escrito=producto["nombre"])
             for c in verificados:
                 if c["id"] in revision:
                     c["coincide"] = {**revision[c["id"]], "titulo": c.get("titulo")}
         except ia.ErrorIA as e:
             print(f"  (No se pudo revisar si son el mismo producto: {e})")
 
-    orden = {"si": 0, "variante": 1, None: 1, "no": 2}
-    verificados.sort(key=lambda c: (orden.get((c.get("coincide") or {}).get("veredicto")),
+    orden_veredicto = {"si": 0, "variante": 1, None: 1, "no": 2}
+    verificados.sort(key=lambda c: (orden_veredicto.get((c.get("coincide") or {}).get("veredicto")),
                                     c["stock"] is False, c.get("total_eur") or 1e9))
     registro["candidatos"] = verificados
     registro["fin"] = iso(ahora())

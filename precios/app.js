@@ -440,7 +440,7 @@ function tituloEnvio(e) {
 
 // ---------- Sugerencias de la IA ----------
 function sugerencias(p, buscando) {
-  if (buscando) return `<div class="sugerencias"><p class="tenue"><span class="girando">✨</span> La IA está buscando tiendas y comprobando sus precios (1-3 min)…</p></div>`;
+  if (buscando) return `<div class="sugerencias"><p class="tenue"><span class="girando">✨</span> La IA está buscando tiendas y comprobando sus precios (2-4 min)…</p></div>`;
   const b = busquedas[p.id];
   if (!b) return "";
   // Lo que ha entendido la IA del nombre escrito (para que se vea qué ha buscado)

@@ -242,18 +242,30 @@ def _mejor_oferta(ofertas):
     return None
 
 
-def _desde_jsonld(soup):
+def _palabras(texto):
+    return {w for w in re.findall(r"[a-z0-9]+", (texto or "").lower()) if len(w) >= 3}
+
+
+def _desde_jsonld(soup, referencia=""):
+    """referencia: URL + título de la página. Si hay varios productos (p. ej. "también te puede gustar"),
+    se queda con el que se parece a la página; si ninguno se parece, no se fía del precio (le pasaba a Sephora)."""
     res = {}
     bloques = list(_bloques_jsonld(soup))
-    for d in bloques:
-        if "product" in _tipos(d):
-            res.setdefault("titulo", d.get("name"))
-            if not res.get("imagen"):
-                res["imagen"] = _primera_imagen(d.get("image"))
-            oferta = _mejor_oferta(d.get("offers"))
-            if oferta and (oferta["precio"] or oferta["stock"] is False):
-                res.update({k: v for k, v in oferta.items() if v is not None})
-                return res
+    productos = [d for d in bloques if "product" in _tipos(d)]
+    ref = _palabras(referencia)
+    parecido = {id(d): len(_palabras(str(d.get("name") or "")) & ref) for d in productos}
+    if len(productos) > 1 and ref:
+        productos.sort(key=lambda d: -parecido[id(d)])
+    for d in productos:
+        if len(productos) > 1 and ref and not parecido[id(d)]:
+            break
+        res.setdefault("titulo", d.get("name"))
+        if not res.get("imagen"):
+            res["imagen"] = _primera_imagen(d.get("image"))
+        oferta = _mejor_oferta(d.get("offers"))
+        if oferta and (oferta["precio"] or oferta["stock"] is False):
+            res.update({k: v for k, v in oferta.items() if v is not None})
+            return res
     for d in bloques:  # Ofertas sueltas sin Product
         if {"offer", "aggregateoffer"} & set(_tipos(d)):
             oferta = _datos_oferta(d)
@@ -379,7 +391,9 @@ def analizar(html, url):
     """Extrae los datos de un HTML ya descargado."""
     soup = BeautifulSoup(html, "html.parser")
     datos = {}
-    for fuente in (_desde_jsonld(soup), _desde_selectores(soup, url, html), _desde_meta(soup),
+    referencia = " ".join([urlparse(url).path.replace("-", " "), _meta(soup, "og:title") or "",
+                           soup.title.get_text(" ", strip=True) if soup.title else ""])
+    for fuente in (_desde_jsonld(soup, referencia), _desde_selectores(soup, url, html), _desde_meta(soup),
                    _desde_genericos(soup)):
         for k, v in fuente.items():
             if datos.get(k) is None and v is not None:

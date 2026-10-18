@@ -195,38 +195,71 @@ REGLAS_ENVIO = """Para el envío a España (península), indica:
 
 
 # ---------- 0. Entender lo que ha escrito el usuario ----------
+AVISO_NOVEDADES = """OJO: puede ser un producto más nuevo que lo que tú conoces. Si el usuario escribe un modelo que no
+te suena (p. ej. "Pixel 10a"), NO lo cambies por otro que sí conozcas (p. ej. "Pixel 8a"): confía en lo que escribe."""
+
+
+def _modelos_escritos(texto):
+    """Números de modelo que escribió el usuario ("pixel 10a" -> {"10a"}, "256gb" -> {"256gb"})."""
+    return {t for t in re.findall(r"[a-z0-9]+", texto.lower()) if any(c.isdigit() for c in t)}
+
+
+def _dominio(t):
+    t = re.sub(r"^https?://", "", str(t).strip().lower()).removeprefix("www.")
+    t = t.split("/")[0]
+    return t if re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", t) else None
+
+
 def interpretar(nombre, descripcion=""):
-    """Convierte "diesel only the brave" en el producto exacto y una buena consulta de búsqueda."""
+    """Convierte "diesel only the brave" en el producto exacto, una buena consulta de búsqueda
+    y las tiendas típicas de ese tipo de producto en España."""
     prompt = f"""Un usuario ha escrito así un producto que quiere comprar (puede tener faltas, estar incompleto o en minúsculas):
 Nombre: {nombre}
 Detalles: {descripcion or "(ninguno)"}
 
-Identifica el producto más probable y responde SOLO con JSON:
+Identifica el producto. Corrige la ortografía y completa la marca si falta, pero mantén EXACTAMENTE
+los números de modelo, versión y generación que ha escrito.
+{AVISO_NOVEDADES}
+
+Responde SOLO con JSON:
 {{"producto": "nombre completo y bien escrito (marca + modelo + variante/tamaño si se deduce)",
   "consulta": "texto corto ideal para buscarlo en tiendas online españolas",
   "resumen": "una frase en español que describa el producto",
-  "claves": "detalles que distinguen la versión correcta de otras parecidas (p. ej. Eau de Toilette vs Parfum, capacidad, color) o vacío"}}
+  "claves": "detalles que distinguen la versión correcta de otras parecidas (p. ej. Eau de Toilette vs Parfum, capacidad, color) o vacío",
+  "tiendas": ["dominios de las 10 tiendas online más típicas en España para comprar este tipo de producto, de más a menos conocida, p. ej. druni.es"]}}
 No inventes un tamaño o color si el usuario no lo dice: en ese caso no lo pongas."""
     texto, _ = _pedir(prompt, json_puro=True)
     d = _json(texto)
     if not isinstance(d, dict) or not d.get("consulta"):
         raise ErrorIA("La IA no ha entendido el producto")
-    return {k: str(d.get(k) or "")[:200] for k in ("producto", "consulta", "resumen", "claves")}
+    res = {k: str(d.get(k) or "")[:200] for k in ("producto", "consulta", "resumen", "claves")}
+    # Si la IA ha cambiado un número de modelo (10a -> 8a), manda lo que escribió el usuario
+    junto = re.sub(r"[^a-z0-9]", "", (res["producto"] + res["consulta"]).lower())
+    if any(m not in junto for m in _modelos_escritos(nombre)):
+        print(f"  (la IA cambió el modelo a «{res['producto']}»; se busca tal cual: «{nombre}»)")
+        res = {"producto": nombre, "consulta": nombre, "resumen": "", "claves": ""}
+    tiendas = d.get("tiendas") if isinstance(d.get("tiendas"), list) else []
+    res["tiendas"] = list(dict.fromkeys(x for x in map(_dominio, tiendas) if x))[:12]
+    return res
 
 
 # ---------- 1. Buscar tiendas ----------
-def buscar_tiendas(nombre, descripcion=""):
+def buscar_tiendas(nombre, descripcion="", tiendas=()):
     """Busca en Google dónde comprar el producto. Devuelve una lista de candidatos (sin verificar)."""
+    tipicas = (f"- Busca sobre todo en las tiendas típicas de este tipo de producto: {', '.join(tiendas)}.\n"
+               if tiendas else "")
     prompt = f"""Busca en Google tiendas online donde se pueda comprar este producto NUEVO con envío a España.
 
 Producto: {nombre}
 Detalles: {descripcion or "(ninguno)"}
+{AVISO_NOVEDADES}
 
+{tipicas}
 - Incluye tiendas de España y también de otros países si envían a España (Amazon, la tienda oficial de la marca, grandes cadenas, tiendas especializadas...).
 - Quiero la URL DIRECTA de la ficha del producto en cada tienda, no búsquedas, categorías, comparadores, foros, reseñas, vídeos ni segunda mano.
 - Da la mejor URL que encuentres de cada tienda para este producto: luego comprobamos cada enlace nosotros,
   así que es mejor dar una URL dudosa que no dar ninguna. Busca varias veces si hace falta.
-- Entre 5 y 12 tiendas, primero las más conocidas y fiables. Acepta tamaños o formatos parecidos si no se especifican.
+- Entre 8 y 15 tiendas distintas, primero las más conocidas y fiables. Acepta tamaños o formatos parecidos si no se especifican.
 {REGLAS_ENVIO}
 
 Responde SOLO con este JSON:
@@ -285,18 +318,22 @@ Responde SOLO con JSON: {{"elegidos": [{{"n": 0, "tienda": "...", "pais": "ES", 
 
 
 # ---------- 2. ¿Es el mismo producto? ----------
-def revisar_enlaces(nombre, descripcion, enlaces):
-    """enlaces: [{"id", "tienda", "titulo", "precio", "moneda"}] -> {id: {"veredicto", "motivo"}}"""
+def revisar_enlaces(nombre, descripcion, enlaces, escrito=""):
+    """enlaces: [{"id", "tienda", "titulo", "precio", "moneda", "url"}] -> {id: {"veredicto", "motivo"}}"""
     lista = "\n".join(f'- id={e["id"]} | tienda: {e.get("tienda")} | título: {e.get("titulo") or "?"} | '
-                      f'precio: {e.get("precio")} {e.get("moneda") or ""}' for e in enlaces)
+                      f'precio: {e.get("precio")} {e.get("moneda") or ""} | url: {(e.get("url") or "")[:160]}'
+                      for e in enlaces)
     prompt = f"""Un usuario vigila el precio de este producto:
 Producto: {nombre}
+Lo que escribió el usuario: {escrito or nombre}
 Detalles: {descripcion or "(ninguno)"}
+{AVISO_NOVEDADES}
 
 Estos son los anuncios de varias tiendas. Para cada uno decide si es EXACTAMENTE ese producto:
 - "si": es el mismo producto (el color o la talla pueden variar si el usuario no los especificó).
-- "variante": es el mismo producto pero otra versión que importa (otra capacidad, modelo anterior/posterior, pack, reacondicionado, importación de otro país o idioma, color distinto si el usuario lo pidió...).
-- "no": es otro producto, un accesorio, un recambio o una funda.
+- "variante": es el mismo producto pero otra versión que importa (otra capacidad o tamaño, pack, reacondicionado, importación de otro país o idioma, Eau de Toilette en vez de Eau de Parfum, color distinto si el usuario lo pidió...).
+- "no": es otro producto (otra generación o número de modelo: Pixel 8a no es Pixel 10a), un accesorio, un recambio o una funda.
+Si el título es pobre o raro, decide por la URL (suele llevar el nombre del producto). Pon "no" solo si está claro que es otro producto.
 Fíjate también en precios absurdamente bajos o altos comparados con los demás.
 
 {lista}
