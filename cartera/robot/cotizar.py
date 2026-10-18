@@ -243,7 +243,10 @@ def distancia(cot, info):
     if not pagado or not fx_cot or not fx_pago:
         return 0.0   # sin precio con el que comparar: vale el primero que salga
     r = (cot["precio"] * fx_cot) / (pagado * fx_pago)
-    return abs(math.log(r)) if 0.5 <= r <= 2.0 else None
+    if not 0.5 <= r <= 2.0:
+        return None
+    # Un poco de ventaja para el que cotiza en la moneda en que pagaste (en euros: Xetra antes que Nasdaq)
+    return abs(math.log(r)) + (0 if cot["divisa"] == info.get("divisa", "EUR") else 0.05)
 
 
 def resolver(clave, info):
