@@ -17,6 +17,7 @@ Uso:  python cotizar.py --datos cartera --salida cotizaciones.json
 
 import argparse
 import json
+import math
 import re
 import time
 import urllib.parse
@@ -231,19 +232,18 @@ def a_euros(divisa):
     return _cambios[divisa]
 
 
-def encaja(cot, info):
-    """¿Este valor puede ser el tuyo? Su precio tiene que parecerse al que pagaste
-    (entre la mitad y el doble) y, si dijiste que es cripto, tiene que ser cripto."""
+def distancia(cot, info):
+    """¿Este valor puede ser el tuyo? Devuelve lo lejos que está su precio del que pagaste
+    (0 = igual) o None si no puede ser: si se aleja más de la mitad o el doble,
+    o si dijiste que es cripto y no lo es."""
     if info.get("tipo") == "cripto" and TIPO_DE_YAHOO.get(cot["tipo"]) != "cripto":
-        return False
+        return None
     pagado = info.get("precioCompra")
-    if not pagado:
-        return True
     fx_cot, fx_pago = a_euros(cot["divisa"]), a_euros(info.get("divisa", "EUR"))
-    if not fx_cot or not fx_pago:
-        return True
+    if not pagado or not fx_cot or not fx_pago:
+        return 0.0   # sin precio con el que comparar: vale el primero que salga
     r = (cot["precio"] * fx_cot) / (pagado * fx_pago)
-    return 0.5 <= r <= 2.0
+    return abs(math.log(r)) if 0.5 <= r <= 2.0 else None
 
 
 def resolver(clave, info):
@@ -261,18 +261,21 @@ def resolver(clave, info):
     for s in directos:
         try:
             cot = cotizar(s, info["desde"])
-            if encaja(cot, info):
+            if distancia(cot, info) is not None:
                 return cot, None
         except Exception:
             pass
 
-    # Si no, se busca por el nombre y se prueba cada candidato hasta que uno encaje.
-    # Primera vuelta: solo bolsas grandes; segunda: cualquiera.
+    # Si no, se busca por el nombre de varias formas. De cada búsqueda se queda el primer candidato que encaja
+    # y, al final, el que tenga el precio más parecido al que pagaste.
+    # Primera vuelta: solo bolsas grandes; segunda (si no hubo suerte): cualquiera.
     en_euros = info.get("divisa", "EUR") == "EUR"
     textos = textos_de_busqueda(clave, info.get("nombre"), info.get("tipo"))
     resultados = {}
-    candidatos, probados = [], set()
+    candidatos, probados, mejores = [], set(), []
     for vuelta in ("grandes", "todas"):
+        if mejores:
+            break
         for texto in textos:
             if texto not in resultados:
                 try:
@@ -290,8 +293,14 @@ def resolver(clave, info):
                     cot = cotizar(c["simbolo"], info["desde"])
                 except Exception:
                     continue
-                if encaja(cot, info):
-                    return cot, candidatos[:8]
+                d = distancia(cot, info)
+                if d is not None:
+                    mejores.append((d, len(mejores), cot))
+                    break
+            if mejores and min(mejores)[0] < 0.03:   # casi el mismo precio que pagaste: no hace falta seguir
+                break
+    if mejores:
+        return min(mejores)[2], candidatos[:8]
     if candidatos:
         raise NoEncaja(candidatos[:8])
     raise ValueError("no encuentro ningún valor con ese nombre")
