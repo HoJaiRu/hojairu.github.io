@@ -132,7 +132,8 @@ SUFIJOS = re.compile(r"\b(incorporated|inc|corporation|corp|company|co|limited|l
 
 
 def normalizar(t):
-    return re.sub(r"[^a-z0-9& ]+", " ", (t or "").lower()).strip()
+    """Minúsculas y solo letras y números ("S&P 500" -> "sp 500")."""
+    return re.sub(r"[^a-z0-9 ]+", " ", (t or "").lower().replace("&", "")).strip()
 
 
 def empresa(nombre):
@@ -140,27 +141,31 @@ def empresa(nombre):
     return " ".join(SUFIJOS.sub(" ", normalizar(nombre)).split()[:2])
 
 
-def palabra_clave(texto):
-    """La primera palabra que de verdad identifica el valor ("Alphabet (A)" -> "alphabet")."""
-    for w in normalizar(re.sub(r"\(.*?\)", " ", texto)).split():
-        if len(w) >= 2 and w not in VACIAS:
-            return w
-    return None
+def palabras_clave(texto):
+    """Las palabras que de verdad identifican el valor ("Core S&P 500 USD (Acc)" -> core, sp, 500)."""
+    return [w for w in normalizar(re.sub(r"\(.*?\)", " ", texto or "")).split() if len(w) >= 2 and w not in VACIAS]
 
 
-def buscar(texto):
-    """Lista de valores que encajan con un texto (nombre, símbolo o ISIN) según Yahoo,
-    quitando los que no tienen nada que ver (Yahoo a veces devuelve cualquier cosa)."""
+def sin_vacias(texto):
+    """El texto sin "USD", "Acc", "(Dist)"...: "Core S&P 500 USD (Acc)" -> "Core S&P 500"."""
+    t = re.sub(r"\(.*?\)", " ", texto)
+    return " ".join(w for w in t.split() if normalizar(w) not in VACIAS)
+
+
+def buscar(texto, original=None):
+    """Lista de valores que encajan con un texto (nombre, símbolo o ISIN) según Yahoo, quitando los que
+    no tienen nada que ver: tienen que salir todas las palabras de lo que escribiste (Yahoo a veces devuelve cualquier cosa)."""
     datos = pedir(URL_BUSCAR.format(urllib.parse.quote(texto)))
-    clave = None if PARECE_ISIN.match(texto.upper()) else palabra_clave(texto)
+    base = original or texto
+    claves = [] if PARECE_ISIN.match(base.upper().strip()) else palabras_clave(base)
     res = []
     for q in datos.get("quotes") or []:
         tipo = TIPOS.get(q.get("quoteType"))
         nombre = q.get("longname") or q.get("shortname") or q.get("symbol") or ""
         if not tipo or not q.get("symbol") or "derivatives" in nombre.lower():
             continue
-        hay = normalizar(nombre + " " + q["symbol"])
-        if clave and clave not in hay and clave not in hay.replace(" ", ""):
+        hay = normalizar(nombre + " " + q["symbol"]).replace(" ", "")
+        if any(w not in hay for w in claves):
             continue
         res.append({
             "simbolo": q["symbol"],
@@ -183,13 +188,13 @@ def textos_de_busqueda(clave, nombre, tipo=None):
             salida.append(v)
     for t in (nombre, clave):
         if t:
-            for v in (re.sub(r"[()]", " ", t), re.sub(r"\(.*?\)", " ", t), t, t.replace(" ", "")):
+            for v in (re.sub(r"[()]", " ", t), re.sub(r"\(.*?\)", " ", t), sin_vacias(t), t, t.replace(" ", "")):
                 poner(v)
     base = nombre or clave
     if base and (tipo == "etf" or re.search(r"\b(acc|dist|ucits)\b", base, re.I)) \
             and not any(g.lower() in base.lower() for g in GESTORAS):
         for g in GESTORAS:
-            poner(f"{g} {re.sub(r'[()]', ' ', base)}")
+            poner(f"{g} {sin_vacias(base)}")
     return salida
 
 
@@ -228,7 +233,7 @@ def a_euros(divisa):
 
 def encaja(cot, info):
     """¿Este valor puede ser el tuyo? Su precio tiene que parecerse al que pagaste
-    (entre 0,4 y 2,5 veces) y, si dijiste que es cripto, tiene que ser cripto."""
+    (entre la mitad y el doble) y, si dijiste que es cripto, tiene que ser cripto."""
     if info.get("tipo") == "cripto" and TIPO_DE_YAHOO.get(cot["tipo"]) != "cripto":
         return False
     pagado = info.get("precioCompra")
@@ -238,7 +243,7 @@ def encaja(cot, info):
     if not fx_cot or not fx_pago:
         return True
     r = (cot["precio"] * fx_cot) / (pagado * fx_pago)
-    return 0.4 <= r <= 2.5
+    return 0.5 <= r <= 2.0
 
 
 def resolver(clave, info):
@@ -271,7 +276,7 @@ def resolver(clave, info):
         for texto in textos:
             if texto not in resultados:
                 try:
-                    resultados[texto] = buscar(texto)
+                    resultados[texto] = buscar(texto, info.get("nombre") or clave)
                 except Exception:
                     resultados[texto] = []
                 for c in resultados[texto]:
