@@ -85,6 +85,12 @@ function abrirDia(k) {
   pintar();
 }
 
+function moverDia(n) {
+  const d = desdeClave(fechaAbierta());
+  d.setDate(d.getDate() + n);
+  abrirDia(clave(d));
+}
+
 // ---------- Aviso abajo (con botón "Deshacer" opcional) ----------
 let temporizadorAviso;
 function avisar(texto, boton, accion) {
@@ -150,9 +156,9 @@ function iniciar() {
   // Leyenda de colores (abajo)
   $("#leyenda").innerHTML = CATEGORIAS.map((c) =>
     `<span style="--c:${c.color}"><i></i>${esc(c.nombre)}</span>`).join("") +
-    `<span class="leyenda-festivo"><i></i>Festivo</span>`;
+    `<span class="leyenda-festivo"><i></i>Festivo</span><span class="leyenda-sin-clase"><i></i>Sin clase</span>`;
 
-  iniciarPanel({ alCerrar: () => pintar(), avisar });
+  iniciarPanel({ alCerrar: () => pintar(), avisar, irADia: abrirDia });
   iniciarHoy(abrirDia);
 
   almacen.alCambiar((que) => {
@@ -249,10 +255,14 @@ function iniciar() {
       if (!$("#menu").hidden) return alternarMenu(false);
       return cerrarPanel();
     }
-    if (e.target.closest("input, textarea, select, dialog") || e.ctrlKey || e.metaKey || e.altKey) return;
+    // Mientras escribes, las teclas son para el texto (salvo las flechas con el cuadro vacío)
+    const escribiendo = e.target.closest("input, textarea, select, dialog");
+    const cuadroVacio = e.target.id === "nota-texto" && !e.target.value && e.key.startsWith("Arrow");
+    if ((escribiendo && !cuadroVacio) || e.ctrlKey || e.metaKey || e.altKey) return;
     const accion = {
-      ArrowLeft: () => mover(-1),
-      ArrowRight: () => mover(1),
+      // Con la ventana de un día abierta, las flechas pasan de día; si no, de mes
+      ArrowLeft: () => (fechaAbierta() ? moverDia(-1) : mover(-1)),
+      ArrowRight: () => (fechaAbierta() ? moverDia(1) : mover(1)),
       t: irAHoy, T: irAHoy,
       1: () => cambiarVista("mes"),
       2: () => cambiarVista("tres"),

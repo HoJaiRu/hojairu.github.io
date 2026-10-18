@@ -12,7 +12,8 @@ import { CONFIG } from "./config.js";
 const CLAVE_LOCAL = "calendario.notas";
 // La misma llave que usa el Vigilante de precios (mismo sitio web), así no hay que pegarla dos veces
 const CLAVE_LLAVE = "vigilante-precios.token";
-const DIAS_GUARDAR_BORRADAS = 180;   // las notas borradas se recuerdan un tiempo para que la mezcla funcione
+const DIAS_GUARDAR_BORRADAS = 180;
+const CAT_ANUAL = "cumple";          // las notas de esta categoría salen todos los años   // las notas borradas se recuerdan un tiempo para que la mezcla funcione
 
 let datos = vacio();       // { version, notas: { id: nota } }
 let porDia = new Map();    // "AAAA-MM-DD" -> [notas], para pintar rápido
@@ -44,12 +45,16 @@ function guardarLocal() {
 }
 function leerLlave() { try { return localStorage.getItem(CLAVE_LLAVE) || ""; } catch { return ""; } }
 
+let anuales = new Map();   // "MM-DD" -> [cumpleaños], que se repiten cada año
+
 function reindexar() {
   porDia = new Map();
+  anuales = new Map();
   for (const n of Object.values(datos.notas)) {
     if (n.borrada) continue;
-    if (!porDia.has(n.fecha)) porDia.set(n.fecha, []);
-    porDia.get(n.fecha).push(n);
+    const [indice, k] = n.cat === CAT_ANUAL ? [anuales, n.fecha.slice(5)] : [porDia, n.fecha];
+    if (!indice.has(k)) indice.set(k, []);
+    indice.get(k).push(n);
   }
   for (const lista of porDia.values()) lista.sort(ordenNotas);
 }
@@ -73,8 +78,19 @@ export function iniciar() {
   });
 }
 
-export const notasDe = (claveDia) => porDia.get(claveDia) || [];
-export const diasConNotas = () => porDia;
+// Notas de un día ("AAAA-MM-DD"), incluidos los cumpleaños de ese día de cualquier año
+export function notasDe(claveDia) {
+  const normales = porDia.get(claveDia) || [];
+  const md = claveDia.slice(5);
+  let cumples = anuales.get(md) || [];
+  // Quien nació un 29 de febrero lo celebra el 28 los años que no son bisiestos
+  const anio = +claveDia.slice(0, 4);
+  if (md === "02-28" && !(anio % 4 === 0 && (anio % 100 !== 0 || anio % 400 === 0))) {
+    cumples = cumples.concat(anuales.get("02-29") || []);
+  }
+  if (!cumples.length) return normales;
+  return [...cumples.map((n) => ({ ...n, fecha: claveDia })), ...normales];
+}
 export const tieneLlave = () => !!llave;
 
 export function guardarNota(nota) {

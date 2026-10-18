@@ -2,7 +2,7 @@
 // Solo genera el HTML; los clics los gestiona app.js.
 
 import { CATEGORIAS } from "./config.js";
-import { MESES, DIAS_CORTOS, clave, hoy, casillasDelMes, festivo } from "./fechas.js";
+import { MESES, DIAS_CORTOS, clave, hoy, casillasDelMes, sumarDias, festivo, noLectivo, diaLibre, marcaCurso } from "./fechas.js";
 import { notasDe } from "./almacen.js";
 
 const colorDe = (catId) => (CATEGORIAS.find((c) => c.id === catId) || CATEGORIAS.at(-1)).color;
@@ -10,9 +10,9 @@ const colorDe = (catId) => (CATEGORIAS.find((c) => c.id === catId) || CATEGORIAS
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-// Color con el que se "tiñe" un día: el de su primera nota destacada (si tiene)
+// Color con el que se "tiñe" un día: el de su primera nota destacada o cumpleaños (si tiene)
 function tinteDelDia(notas) {
-  const d = notas.find((n) => n.destacada);
+  const d = notas.find((n) => n.destacada || n.cat === "cumple");
   return d ? colorDe(d.cat) : "";
 }
 
@@ -23,7 +23,8 @@ function clasesDia(d, mes, seleccion) {
     d.getMonth() !== mes && "fuera",
     k === clave(hoy()) && "hoy",
     d.getDay() % 6 === 0 && "finde",
-    festivo(d) && "festivo",
+    festivo(d) ? "festivo" : noLectivo(d) && "sin-clase",
+    marcaCurso(d) && "marca-curso",
     k === seleccion && "elegido",
   ].filter(Boolean).join(" ");
 }
@@ -44,11 +45,15 @@ export function vistaMes(anio, mes, seleccion) {
   const casillas = casillasDelMes(anio, mes).map((d) => {
     const k = clave(d);
     const notas = notasDe(k);
-    const fest = festivo(d);
+    // Etiqueta del día: festivo, inicio/fin de clases, o el nombre de las vacaciones
+    // (este solo el primer día del periodo y cada lunes, para no repetirlo en todas las casillas)
+    const nl = noLectivo(d);
+    const fest = festivo(d) || marcaCurso(d) ||
+      (nl && (nl !== noLectivo(sumarDias(d, -1)) || d.getDay() === 1 || d.getDate() === 1) ? nl : "");
     const tinte = tinteDelDia(notas);
     const chips = notas.slice(0, 3).map((n) =>
       `<span class="chip${n.hecha ? " hecha" : ""}" style="--c:${colorDe(n.cat)}">` +
-      `${n.hora ? `<em>${esc(n.hora)}</em> ` : ""}${esc(n.texto)}</span>`).join("");
+      `${n.cat === "cumple" ? "🎂 " : ""}${n.hora ? `<em>${esc(n.hora)}</em> ` : ""}${esc(n.texto)}</span>`).join("");
     const mas = notas.length > 3 ? `<span class="chip-mas">+${notas.length - 3} más</span>` : "";
     const etiqueta = `${d.getDate()} de ${MESES[d.getMonth()]}${fest ? ", " + fest : ""}` +
       (notas.length ? `, ${notas.length} nota${notas.length > 1 ? "s" : ""}` : "");
@@ -77,7 +82,7 @@ function miniMes(anio, mes, seleccion, modo) {
     }
     const tinte = tinteDelDia(notas);
     return `<button class="${clasesDia(d, mes, seleccion)} mini-dia${tinte ? " tenido" : ""}" data-fecha="${k}"${extra}` +
-      `${tinte ? ` style="--tinte:${tinte}"` : ""} title="${esc(festivo(d) || "")}" aria-label="${d.getDate()} de ${MESES[mes]}">` +
+      `${tinte ? ` style="--tinte:${tinte}"` : ""} title="${esc(diaLibre(d) || marcaCurso(d))}" aria-label="${d.getDate()} de ${MESES[mes]}">` +
       `<span class="num">${d.getDate()}</span>` +
       (modo === "puntos" && notas.length ? puntos(notas, 3) : "") +
       `</button>`;

@@ -1,7 +1,7 @@
 // fechas.js - Utilidades de fechas y festivos de España.
 // Las fechas de las notas se guardan como texto "AAAA-MM-DD" (sin horas), así no hay líos de husos horarios.
 
-import { FESTIVOS_EXTRA, JUEVES_SANTO } from "./config.js";
+import { FESTIVOS_EXTRA, JUEVES_SANTO, CURSO } from "./config.js";
 
 export const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
@@ -104,15 +104,38 @@ export function festivosDe(anio) {
 
 export const festivo = (d) => festivosDe(d.getFullYear()).get(clave(d)) || "";
 
-// ---------- Puentes ----------
-const libre = (d) => d.getDay() % 6 === 0 || !!festivo(d);   // sábado, domingo o festivo
+// ---------- Calendario escolar ----------
 
-// Próximo "puente": un festivo que, junto con el fin de semana, da 3 o más días libres seguidos.
+// Map { "AAAA-MM-DD": "Vacaciones de Navidad" } con todos los días sin clase del curso
+const noLectivos = new Map();
+for (const { desde, hasta, nombre } of CURSO?.noLectivos || []) {
+  for (let d = desdeClave(desde); clave(d) <= (hasta || desde); d = sumarDias(d, 1)) noLectivos.set(clave(d), nombre);
+}
+
+// Nombre del periodo sin clase (vacaciones, día del docente...) o ""
+export const noLectivo = (d) => noLectivos.get(clave(d)) || "";
+
+// Lo que se enseña en el día: el festivo oficial y, si no hay, el día sin clase
+export const diaLibre = (d) => festivo(d) || noLectivo(d);
+
+// Marcas del curso: inicio y fin de clases
+export function marcaCurso(d) {
+  if (!CURSO) return "";
+  const k = clave(d);
+  if (k === CURSO.inicio) return "Inicio de clases";
+  if (k === CURSO.fin) return "Fin de clases";
+  return "";
+}
+
+// ---------- Puentes ----------
+const libre = (d) => d.getDay() % 6 === 0 || !!diaLibre(d);   // sábado, domingo, festivo o sin clase
+
+// Próximo "puente": un festivo o día sin clase que, junto con el fin de semana, da 3 o más días libres seguidos.
 // Devuelve { nombre, inicio (Date), dias } o null.
 export function proximoPuente(desde, maxDias = 400) {
   for (let i = 1; i <= maxDias; i++) {
     const d = sumarDias(desde, i);
-    if (!festivo(d) || d.getDay() % 6 === 0) continue;   // festivo en día laborable
+    if (!diaLibre(d) || d.getDay() % 6 === 0) continue;   // día libre que cae entre semana
     let inicio = d, fin = d;
     while (libre(sumarDias(inicio, -1))) inicio = sumarDias(inicio, -1);
     while (libre(sumarDias(fin, 1))) fin = sumarDias(fin, 1);
@@ -121,13 +144,18 @@ export function proximoPuente(desde, maxDias = 400) {
       i += diasEntre(d, fin);   // salta este bloque
       continue;
     }
-    // Nombre: el de Semana Santa si toca; si no, el del festivo
-    const nombres = [];
-    for (let x = inicio; clave(x) <= clave(fin); x = sumarDias(x, 1)) if (festivo(x)) nombres.push(festivo(x));
-    const tiene = (t) => nombres.some((n) => n.startsWith(t));
-    const nombre = tiene("Viernes Santo") ? "Semana Santa"
+    // Nombre: el del periodo de vacaciones si lo hay; si no, el del festivo
+    const nombres = [], periodos = [];
+    for (let x = inicio; clave(x) <= clave(fin); x = sumarDias(x, 1)) {
+      if (festivo(x)) nombres.push(festivo(x));
+      if (noLectivo(x)) periodos.push(noLectivo(x));
+    }
+    const todos = [...nombres, ...periodos];
+    const tiene = (t) => todos.some((n) => n.startsWith(t));
+    const nombre = periodos.find((n) => n.startsWith("Vacaciones")) || (tiene("Carnaval") ? "Carnaval"
+      : tiene("Viernes Santo") ? "Semana Santa"
       : tiene("Día de la Constitución") && tiene("Inmaculada") ? "Puente de diciembre"
-      : nombres[nombres.length - 1].replace(" (trasladado)", "");
+      : todos[todos.length - 1].replace(" (trasladado)", ""));
     return { nombre, inicio, dias };
   }
   return null;

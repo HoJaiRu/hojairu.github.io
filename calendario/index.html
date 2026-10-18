@@ -74,39 +74,45 @@
     <footer id="leyenda" class="leyenda"></footer>
   </main>
 
-  <!-- ===== PANEL DEL DÍA (se abre al pulsar un día) ===== -->
+  <!-- ===== VENTANA DEL DÍA (se abre en medio al pulsar un día; en el móvil sale desde abajo) ===== -->
   <div id="velo" class="velo" hidden></div>
-  <aside id="panel" class="panel" aria-hidden="true">
+  <section id="panel" class="panel" role="dialog" aria-modal="true" aria-labelledby="panel-fecha" aria-hidden="true">
     <header class="panel-cab">
-      <div>
-        <p class="tenue panel-semana" id="panel-semana"></p>
-        <h2 id="panel-fecha"></h2>
-        <p class="panel-festivo" id="panel-festivo" hidden></p>
+      <div class="panel-dia">
+        <span class="panel-num" id="panel-num"></span>
+        <div>
+          <h2 id="panel-fecha"></h2>
+          <p class="tenue panel-semana" id="panel-semana"></p>
+        </div>
       </div>
-      <button class="btn-icono" id="btn-cerrar-panel" aria-label="Cerrar">✕</button>
+      <div class="panel-botones">
+        <button class="btn-icono" id="btn-dia-anterior" aria-label="Día anterior" title="Día anterior"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <button class="btn-icono" id="btn-dia-siguiente" aria-label="Día siguiente" title="Día siguiente"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+        <button class="btn-icono" id="btn-cerrar-panel" aria-label="Cerrar" title="Cerrar (Esc)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
     </header>
 
+    <p class="panel-etiqueta" id="panel-festivo" hidden></p>
+
     <ul id="panel-notas" class="lista-notas"></ul>
-    <p id="panel-vacio" class="tenue panel-vacio">Nada anotado este día.</p>
+    <p id="panel-vacio" class="panel-vacio">Nada anotado este día</p>
 
     <form id="form-nota" class="form-nota" autocomplete="off">
-      <textarea id="nota-texto" rows="2" placeholder="Añadir una nota…" maxlength="500" required></textarea>
+      <textarea id="nota-texto" rows="1" placeholder="Escribe una nota y pulsa Enter…" maxlength="500" required></textarea>
       <div id="nota-cats" class="cats" role="radiogroup" aria-label="Categoría"></div>
-      <div class="fila">
+      <div class="form-pie">
         <label class="campo-hora" title="Hora (opcional)">
-          <span aria-hidden="true">◷</span>
           <input type="time" id="nota-hora" aria-label="Hora (opcional)">
         </label>
         <label class="interruptor" title="Sale en la cuenta atrás y colorea el día">
           <input type="checkbox" id="nota-destacada"> <span>★ Destacar</span>
         </label>
-      </div>
-      <div class="fila fin">
+        <span class="hueco"></span>
         <button type="button" id="btn-cancelar-edicion" class="btn-texto" hidden>Cancelar</button>
         <button class="btn primario" id="btn-guardar-nota" type="submit">Añadir</button>
       </div>
     </form>
-  </aside>
+  </section>
 
   <!-- ===== CONECTAR CON GITHUB ===== -->
   <dialog id="dlg-llave" class="dialogo">

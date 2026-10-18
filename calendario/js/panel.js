@@ -1,7 +1,7 @@
 // panel.js - El panel lateral de un día: ver, añadir, editar, marcar y borrar notas.
 
 import { CATEGORIAS } from "./config.js";
-import { desdeClave, fechaLarga, festivo, numeroSemana } from "./fechas.js";
+import { MESES, clave, desdeClave, sumarDias, festivo, noLectivo, marcaCurso, numeroSemana } from "./fechas.js";
 import { notasDe, guardarNota, borrarNota } from "./almacen.js";
 import { esc, colorDe } from "./vistas.js";
 
@@ -18,6 +18,9 @@ export const fechaAbierta = () => fecha;
 export function iniciarPanel(opciones) {
   alCerrar = opciones.alCerrar;
   avisar = opciones.avisar;
+  const mover = (n) => opciones.irADia(clave(sumarDias(desdeClave(fecha), n)));
+  $("#btn-dia-anterior").addEventListener("click", () => mover(-1));
+  $("#btn-dia-siguiente").addEventListener("click", () => mover(1));
 
   // Botones de categoría (se generan a partir de config.js)
   let ultima = CATEGORIAS[0].id;
@@ -31,6 +34,9 @@ export function iniciarPanel(opciones) {
   $("#velo").addEventListener("click", cerrarPanel);
   $("#btn-cancelar-edicion").addEventListener("click", limpiarFormulario);
   $("#form-nota").addEventListener("submit", (e) => { e.preventDefault(); enviar(); });
+
+  // El cuadro de texto crece según escribes
+  $("#nota-texto").addEventListener("input", ajustarAlto);
 
   // Enter guarda; Mayús+Enter hace salto de línea
   $("#nota-texto").addEventListener("keydown", (e) => {
@@ -59,11 +65,13 @@ export function abrirPanel(nuevaFecha, { enfocar = true } = {}) {
   if (fecha !== nuevaFecha) limpiarFormulario();
   fecha = nuevaFecha;
   const d = desdeClave(fecha);
-  const fest = festivo(d);
-  $("#panel-semana").textContent = `Semana ${numeroSemana(d)} · ${d.getFullYear()}`;
-  $("#panel-fecha").textContent = fechaLarga(d);
-  $("#panel-festivo").textContent = fest;
-  $("#panel-festivo").hidden = !fest;
+  const etiqueta = festivo(d) || noLectivo(d) || marcaCurso(d);
+  $("#panel-num").textContent = d.getDate();
+  $("#panel-fecha").textContent = d.toLocaleDateString("es-ES", { weekday: "long" });
+  $("#panel-semana").textContent = `${MESES[d.getMonth()]} ${d.getFullYear()} · semana ${numeroSemana(d)}`;
+  $("#panel-festivo").textContent = etiqueta;
+  $("#panel-festivo").hidden = !etiqueta;
+  $("#panel-festivo").className = "panel-etiqueta " + (festivo(d) || noLectivo(d) ? "libre" : "curso");
   pintarPanel();
   $("#panel").classList.add("abierto");
   $("#panel").setAttribute("aria-hidden", "false");
@@ -90,19 +98,21 @@ export function pintarPanel() {
   $("#panel-vacio").hidden = notas.length > 0;
   $("#panel-notas").innerHTML = notas.map((n) => `
     <li data-id="${n.id}" class="${n.hecha ? "hecha" : ""}${n.id === editando ? " editando" : ""}" style="--c:${colorDe(n.cat)}">
-      <button class="marcar" title="${n.hecha ? "Marcar como pendiente" : "Marcar como hecha"}" aria-label="Hecha">${n.hecha ? "✓" : ""}</button>
+      ${n.cat === "cumple" ? `<span class="tarta" title="Cumpleaños (se repite cada año)">🎂</span>`
+        : `<button class="marcar" title="${n.hecha ? "Marcar como pendiente" : "Marcar como hecha"}" aria-label="Hecha">${n.hecha ? "✓" : ""}</button>`}
       <button class="texto" title="Editar">
         ${n.hora ? `<em>${esc(n.hora)}</em>` : ""}
         <span>${esc(n.texto)}</span>
         ${n.destacada ? `<b class="estrella" title="Destacada">★</b>` : ""}
       </button>
-      <button class="borrar btn-icono" title="Borrar" aria-label="Borrar">✕</button>
+      <button class="borrar btn-icono" title="Borrar" aria-label="Borrar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </li>`).join("");
 }
 
 function empezarEdicion(nota) {
   editando = nota.id;
   $("#nota-texto").value = nota.texto;
+  ajustarAlto();
   $("#nota-hora").value = nota.hora || "";
   $("#nota-destacada").checked = !!nota.destacada;
   const radio = document.querySelector(`#nota-cats input[value="${nota.cat}"]`);
@@ -116,6 +126,7 @@ function empezarEdicion(nota) {
 function limpiarFormulario() {
   editando = null;
   $("#nota-texto").value = "";
+  ajustarAlto();
   $("#nota-hora").value = "";
   $("#nota-destacada").checked = false;
   $("#btn-guardar-nota").textContent = "Añadir";
@@ -140,4 +151,10 @@ function enviar() {
   });
   limpiarFormulario();
   $("#nota-texto").focus();
+}
+
+function ajustarAlto() {
+  const t = $("#nota-texto");
+  t.style.height = "auto";
+  t.style.height = Math.min(t.scrollHeight, 160) + "px";
 }
