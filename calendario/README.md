@@ -27,7 +27,6 @@ Calendario minimalista con notas por día y una tarjeta "Hoy" (resumen matinal).
 | `js/app.js` | Une todo: botones, menú, atajos de teclado, deslizar en el móvil y el QR para el móvil |
 | `js/lib/qrcode.mjs` | Librería para dibujar el código QR (qrcode-generator 2.0.4, licencia MIT) |
 | `manifest.webmanifest`, `icono-*.png` | Para instalar la web como app en el móvil o el PC |
-| `avisos/avisos.py` | Manda los recordatorios al móvil (ntfy). Lo lanza cada tarde `WEBS/.github/workflows/calendario-avisos.yml` |
 
 ## Probarlo en tu ordenador
 
@@ -39,13 +38,6 @@ python -m http.server 8000
 ```
 
 y abre http://localhost:8000/calendario/
-
-## Avisos al móvil
-
-Cada tarde (19:00 en invierno, 20:00 en verano) GitHub Actions mira tus notas y te manda a la app
-**ntfy** del móvil lo que tengas al día siguiente. Los cumpleaños y lo importante (categoría Importante
-o ★) te los recuerda además 10 días antes. Usa el mismo canal (`NTFY_TOPIC`) que el Vigilante de precios.
-Los días de antelación se cambian arriba del todo en `avisos/avisos.py`.
 
 ## Ideas para siguientes versiones
 
