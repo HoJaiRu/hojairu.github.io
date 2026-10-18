@@ -46,6 +46,14 @@ function acumular(ops) {
   return { pos, porAnio };
 }
 
+// Tipo de un valor: el que elegiste o, si no, el que dice Yahoo
+const TIPO_YAHOO = { equity: "accion", etf: "etf", mutualfund: "fondo", cryptocurrency: "cripto" };
+export function tipoDe(ticker) {
+  const a = almacen.activo(ticker);
+  if (a?.tipo && a.tipo !== "auto") return a.tipo;
+  return TIPO_YAHOO[cot.de(ticker)?.tipo] || "otro";
+}
+
 // Moneda en la que cotiza un valor
 export function divisaDe(ticker) {
   return cot.de(ticker)?.divisa || almacen.activo(ticker)?.divisa || adivinarDivisa(ticker);
@@ -72,14 +80,15 @@ export function cartera() {
   for (const [ticker, p] of pos) {
     realizado += p.realizado;
     dividendos += p.dividendos;
-    const a = almacen.activo(ticker) || { ticker, tipo: "otro" };
+    const a = { ...(almacen.activo(ticker) || { ticker }), tipo: tipoDe(ticker) };
     const c = cot.de(ticker);
     const fx = c ? cot.aEuros(c.divisa) : null;
     const v = c && fx != null ? p.cantidad * c.precio * fx : null;
     const ayer = c && fx != null && c.cierreAnterior != null ? p.cantidad * c.cierreAnterior * fx : null;
     const item = {
       ticker, activo: a, cotizacion: c,
-      nombre: a.nombre || c?.nombre || ticker,
+      nombre: c?.nombre || a.nombre || ticker,
+      simbolo: a.simbolo || c?.simbolo || null,
       cantidad: p.cantidad, coste: p.coste,
       precioMedio: p.cantidad ? p.coste / p.cantidad : 0,
       valor: v,

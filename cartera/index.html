@@ -137,15 +137,17 @@
       </div>
 
       <label class="campo">
-        <span>Valor <a class="ayuda" href="https://finance.yahoo.com/lookup" target="_blank" rel="noopener">buscar símbolo ↗</a></span>
-        <input id="op-ticker" list="lista-tickers" placeholder="AAPL, SAN.MC, IWDA.AS, BTC-EUR…" required spellcheck="false" autocapitalize="characters">
+        <span>Empresa o valor</span>
+        <input id="op-ticker" list="lista-tickers" placeholder="Amazon, Santander, S&amp;P 500, Bitcoin…" required spellcheck="false">
         <datalist id="lista-tickers"></datalist>
       </label>
 
-      <div id="op-nuevo" class="fila-campos" hidden>
-        <label class="campo"><span>Nombre <small class="tenue">(opcional)</small></span><input id="op-nombre" placeholder="Apple"></label>
+      <div id="op-nuevo" class="op-nuevo" hidden>
+        <p class="tenue">Valor nuevo: la web buscará su precio sola. Si no acierta, podrás elegir el bueno en su ficha.
+          También vale el ISIN o el símbolo (AMZN).</p>
         <label class="campo"><span>Tipo</span>
           <select id="op-clase">
+            <option value="auto">Que lo averigüe la web</option>
             <option value="accion">Acción</option>
             <option value="etf">ETF</option>
             <option value="fondo">Fondo</option>
@@ -195,6 +197,20 @@
       <div class="fila fin">
         <button type="button" class="btn" id="btn-cancelar-manual">Cancelar</button>
         <button type="submit" class="btn primario">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ===== BUSCAR CON OTRO NOMBRE ===== -->
+  <dialog id="dlg-renombrar" class="dialogo">
+    <form id="form-renombrar">
+      <h2>Buscar con otro nombre</h2>
+      <p class="tenue">Escribe el nombre de otra forma, el <b>ISIN</b> (en tu bróker, en la ficha del valor; es lo más seguro)
+        o el símbolo. El robot lo buscará otra vez.</p>
+      <label class="campo"><span>Nombre, ISIN o símbolo</span><input id="renombrar-texto" required spellcheck="false" placeholder="IE00B5BMR087"></label>
+      <div class="fila fin">
+        <button type="button" class="btn" id="btn-cancelar-renombrar">Cancelar</button>
+        <button type="submit" class="btn primario">Buscar</button>
       </div>
     </form>
   </dialog>

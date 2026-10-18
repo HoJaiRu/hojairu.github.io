@@ -267,6 +267,10 @@ main { max-width: 860px; margin: 0 auto; padding: 4px 20px 110px; }
 .con-divisa { display: flex; gap: 6px; }
 .con-divisa select { width: auto; flex: none; }
 .op-total { min-height: 1.2em; font-size: 13.5px; }
+.op-nuevo { display: grid; gap: 10px; }
+.op-nuevo p { font-size: 13px; }
+.elegir-valor { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--tenue); margin: 0 0 10px; }
+.elegir-valor select { font-size: 13.5px; padding: 5px 9px; max-width: 100%; }
 .error { color: var(--peligro); }
 .peligro-texto { color: var(--peligro); }
 

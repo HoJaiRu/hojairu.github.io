@@ -21,6 +21,7 @@ let datos = leerLocal();     // lo último que trajo el robot
 let etag = null;
 const vivo = {};             // ticker -> precio en directo (cripto)
 let esperandoRobot = null;   // { desde, antes } mientras el robot trabaja
+let otraVez = false;         // se pidió otra actualización mientras el robot trabajaba
 const oyentes = new Set();
 export const estado = { texto: "", actualizando: false };
 
@@ -48,7 +49,7 @@ export function iniciar() {
   let antes = "";
   almacen.alCambiar((que) => {
     if (que !== "datos") return;
-    const criptos = almacen.activos().filter((a) => a.tipo === "cripto").map((a) => a.ticker).join();
+    const criptos = almacen.activos().map((a) => a.ticker + (a.simbolo || "")).join();
     if (criptos !== antes) { antes = criptos; leerCripto(); }
   });
 }
@@ -84,7 +85,7 @@ function refrescarSiViejo() {
 // Le pide al robot que traiga precios ahora (tarda unos 30-60 s)
 export async function pedirActualizacion() {
   if (!tieneLlave()) throw new Error("Conecta GitHub para que el robot pueda traer precios");
-  if (esperandoRobot) return;
+  if (esperandoRobot) { otraVez = true; return; }   // ya está trabajando: se le pide otra vez cuando acabe
   await gh("POST", `${API_REPO}/actions/workflows/${workflow}/dispatches`, { cuerpo: { ref: rama } });
   esperandoRobot = { desde: Date.now(), antes: datos.actualizado, temporizador: setInterval(vigilarRobot, 5000) };
   estado.actualizando = true;
@@ -99,6 +100,7 @@ function terminarEspera() {
   esperandoRobot = null;
   estado.actualizando = false;
   avisar();
+  if (otraVez) { otraVez = false; pedirActualizacion().catch(() => {}); }
 }
 
 // ---------- Cripto en directo (Binance, público) ----------
@@ -109,16 +111,18 @@ function parBinance(ticker) {
 }
 
 async function leerCripto() {
-  const criptos = almacen.activos().filter((a) => a.tipo === "cripto" && parBinance(a.ticker));
+  // El símbolo bueno es el que encontró el robot (por ejemplo "Bitcoin" -> BTC-EUR)
+  const simbolo = (a) => a.simbolo || datos.activos?.[a.ticker]?.simbolo || a.ticker;
+  const criptos = almacen.activos().filter((a) => parBinance(simbolo(a)) && (a.tipo === "cripto" || datos.activos?.[a.ticker]?.tipo === "cryptocurrency"));
   if (!criptos.length) return;
   const resultados = await Promise.allSettled(criptos.map(async (a) => {
-    const r = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${parBinance(a.ticker)}`, { cache: "no-store" });
+    const r = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${parBinance(simbolo(a))}`, { cache: "no-store" });
     if (!r.ok) throw new Error(r.status);
     const t = await r.json();
     vivo[a.ticker] = {
       precio: +t.lastPrice,
       cierreAnterior: +t.openPrice,    // precio de hace 24 h (las criptos no "cierran")
-      divisa: a.ticker.endsWith("-USD") ? "USD" : "EUR",
+      divisa: simbolo(a).endsWith("-USD") ? "USD" : "EUR",
       hora: new Date(t.closeTime).toISOString(),
     };
   }));
@@ -139,6 +143,9 @@ export function de(ticker) {
   if (manual) return { precio: manual.precio, cierreAnterior: manual.precio, divisa: almacen.activo(ticker).divisa || "EUR", hora: manual.fecha, fuente: "manual" };
   return null;
 }
+
+// Otros valores que encajaban con el nombre que escribiste (para elegir si el robot no acertó)
+export const candidatos = (ticker) => datos.activos?.[ticker]?.candidatos || datos.opciones?.[ticker] || [];
 
 // Historial de cierres diarios de un valor: { d: ["AAAA-MM-DD"...], c: [precio...] }
 export const historico = (ticker) => datos.activos?.[ticker]?.historico || null;

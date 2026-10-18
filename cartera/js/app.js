@@ -95,8 +95,8 @@ function pintarPosiciones(c) {
     const abierto = abiertos.has(p.ticker);
     return `<li class="posicion${abierto ? " abierta" : ""}" data-ticker="${f.esc(p.ticker)}">
       <button class="pos-fila" aria-expanded="${abierto}">
-        <span class="pos-icono" style="--c:${tipo.color}">${f.esc(iniciales(p.ticker))}</span>
-        <span class="pos-nombre"><b>${f.esc(p.nombre)}</b><small>${f.esc(p.ticker)} · ${f.num(p.cantidad)}</small></span>
+        <span class="pos-icono" style="--c:${tipo.color}">${f.esc(iniciales(p.simbolo || p.ticker))}</span>
+        <span class="pos-nombre"><b>${f.esc(p.nombre)}</b><small>${p.simbolo ? f.esc(p.simbolo) : p.error ? "no encontrado" : "buscando…"} · ${f.num(p.cantidad)}</small></span>
         <span class="pos-mini">${g.mini(cot.historico(p.ticker))}</span>
         <span class="pos-hoy ${f.clase(p.hoyPct)}" title="Hoy">${p.hoyPct == null ? "" : f.pct(p.hoyPct)}</span>
         <span class="pos-valor"><b>${p.valor == null ? `<span class="tenue">${p.error ? "⚠ " : ""}sin precio</span>` : f.euros(p.valor)}</b>
@@ -122,12 +122,36 @@ function detallePosicion(p) {
       ${dato("Peso", f.pctSimple(p.peso || 0))}
       ${p.dividendos ? dato("Dividendos", f.euros(p.dividendos)) : ""}
     </div>
-    <p class="pos-fuente tenue">${fuente}${p.error ? `<span class="error"> · El robot no encuentra este valor (${f.esc(p.error)})</span>` : ""}</p>
+    <p class="pos-fuente tenue">${p.simbolo ? `${f.esc(p.simbolo)}${c?.bolsa ? ` · ${f.esc(c.bolsa)}` : ""} · ` : ""}${fuente}${p.error ? `<span class="error"> · El robot no encuentra este valor (${f.esc(p.error)})</span>` : ""}</p>
+    ${selectorValor(p)}
     <div class="fila">
       <button class="btn" data-accion="nueva" data-ticker="${f.esc(p.ticker)}">+ Operación</button>
+      <button class="btn-texto" data-accion="renombrar" data-ticker="${f.esc(p.ticker)}">Buscar con otro nombre</button>
       <button class="btn-texto" data-accion="manual" data-ticker="${f.esc(p.ticker)}">Precio a mano</button>
     </div>
   </div>`;
+}
+
+// "¿No es este valor?": elegir entre lo que encontró el robot al buscar el nombre
+function selectorValor(p) {
+  const opciones = cot.candidatos(p.ticker);
+  if (!opciones.length) return "";
+  const actual = p.simbolo;
+  const lista = opciones.some((o) => o.simbolo === actual) || !actual ? opciones : [{ simbolo: actual, nombre: p.nombre, bolsa: "" }, ...opciones];
+  return `<label class="elegir-valor">${actual ? "¿No es este valor?" : "¿Es alguno de estos?"}
+    <select data-elegir="${f.esc(p.ticker)}">${actual ? "" : `<option value="" selected disabled>Elige…</option>`}${lista.map((o) =>
+      `<option value="${f.esc(o.simbolo)}"${o.simbolo === actual ? " selected" : ""}>${f.esc(o.nombre)} · ${f.esc(o.simbolo)}${o.bolsa ? ` (${f.esc(o.bolsa)})` : ""}</option>`).join("")}
+    </select></label>`;
+}
+
+// Cuando el robot encuentra el símbolo de un valor escrito por su nombre, se apunta en la cartera
+// para que la próxima vez no tenga que buscarlo (y para que se vea igual en todos tus dispositivos)
+function apuntarSimbolosEncontrados() {
+  for (const a of almacen.activos()) {
+    const c = cot.de(a.ticker);
+    // (solo si lo buscó con el nombre que tiene ahora: si acabas de cambiarlo, hay que esperar a la nueva búsqueda)
+    if (!a.simbolo && c?.simbolo && c.buscado === a.nombre && c.fuente !== "manual") almacen.guardarActivo({ ...a, simbolo: c.simbolo });
+  }
 }
 
 // ---------- Reparto ----------
@@ -222,14 +246,15 @@ function abrirOp({ id, ticker, tipo } = {}) {
   $("#op-titulo").textContent = op ? "Editar operación" : "Nueva operación";
   $("#btn-borrar-op").hidden = !op;
   $("#op-error").hidden = true;
-  $("#lista-tickers").innerHTML = almacen.activos().map((a) => `<option value="${f.esc(a.ticker)}">${f.esc(a.nombre || "")}</option>`).join("");
-  $("#op-ticker").value = op?.ticker || ticker || "";
+  $("#lista-tickers").innerHTML = almacen.activos().map((a) => `<option value="${f.esc(nombreDe(a.ticker))}"></option>`).join("");
+  const t = op?.ticker || ticker;
+  $("#op-ticker").value = t ? nombreDe(t) : "";
   $("#op-fecha").value = op?.fecha || hoyISO();
   $("#op-cantidad").value = op?.cantidad ?? "";
   $("#op-precio").value = op?.precio ?? "";
   $("#op-comision").value = op?.comision || "";
   $("#op-importe").value = op?.importe ?? "";
-  $("#op-nombre").value = "";
+  $("#op-clase").value = "auto";
   ponerTipoOp(op?.tipo || tipo || "compra");
   alCambiarTicker(op?.divisa);
   dlgOp.showModal();
@@ -247,12 +272,25 @@ function ponerTipoOp(t) {
   calcularTotal();
 }
 
+// Nombre bonito de un valor (el de Yahoo si ya lo encontró el robot)
+const nombreDe = (ticker) => cot.de(ticker)?.nombre || almacen.activo(ticker)?.nombre || ticker;
+
+// ¿Lo que has escrito es un valor que ya tienes? Vale el nombre, el símbolo o lo que escribiste la primera vez
+function buscarActivo(texto) {
+  const t = texto.trim().toLowerCase();
+  if (!t) return null;
+  return almacen.activos().find((a) => [a.ticker, a.nombre, a.simbolo, cot.de(a.ticker)?.nombre, cot.de(a.ticker)?.simbolo]
+    .some((x) => x && x.toLowerCase() === t))?.ticker || null;
+}
+
 function alCambiarTicker(divisaFija) {
-  const t = $("#op-ticker").value.trim().toUpperCase();
-  const existe = !!almacen.activo(t);
-  $("#op-nuevo").hidden = existe || !t;
-  if (!existe && /-(EUR|USD)$/.test(t)) $("#op-clase").value = "cripto";
-  $("#op-divisa").value = divisaFija || (t ? calc.divisaDe(t) : "EUR");
+  const texto = $("#op-ticker").value.trim();
+  const existente = buscarActivo(texto);
+  $("#op-nuevo").hidden = !!existente || !texto;
+  if (!existente && /-(EUR|USD)$/i.test(texto)) $("#op-clase").value = "cripto";
+  // La moneda: la de tus operaciones anteriores con ese valor, o euros
+  const ultima = existente && almacen.operaciones().filter((o) => o.ticker === existente && o.divisa).at(-1);
+  $("#op-divisa").value = divisaFija || ultima?.divisa || "EUR";
   calcularTotal();
 }
 
@@ -272,12 +310,12 @@ function calcularTotal() {
 
 function guardarOp(ev) {
   ev.preventDefault();
-  let ticker = $("#op-ticker").value.trim().toUpperCase().replace(/\s+/g, "");
-  const esNuevo = !almacen.activo(ticker);
-  const clase = esNuevo ? $("#op-clase").value : almacen.activo(ticker).tipo;
-  if (esNuevo && clase === "cripto" && !ticker.includes("-")) ticker += "-EUR";   // BTC -> BTC-EUR
+  const texto = $("#op-ticker").value.trim().replace(/\s+/g, " ");
+  const existente = buscarActivo(texto);
+  const ticker = existente || texto.toUpperCase();   // la clave interna del valor
+  const esNuevo = !existente;
   const error = (msg) => { $("#op-error").textContent = msg; $("#op-error").hidden = false; };
-  if (!ticker) return error("Escribe el símbolo del valor");
+  if (!ticker) return error("Escribe el nombre de la empresa o del valor");
 
   const op = { id: editando || undefined, tipo: tipoOp, ticker, fecha: $("#op-fecha").value };
   if (tipoOp === "dividendo") {
@@ -296,12 +334,13 @@ function guardarOp(ev) {
     }
   }
   if (esNuevo) {
-    almacen.guardarActivo({ ticker, tipo: clase, nombre: $("#op-nombre").value.trim() || undefined, divisa: op.divisa });
+    const clase = $("#op-clase").value;
+    almacen.guardarActivo({ ticker, nombre: texto, ...(clase !== "auto" ? { tipo: clase } : {}), divisa: op.divisa });
     tickerNuevoPendiente = tieneLlave();
   }
   almacen.guardarOperacion(op);
   dlgOp.close();
-  avisar(esNuevo && tieneLlave() ? `Guardado. Buscando el precio de ${ticker}…` : "Guardado");
+  avisar(esNuevo && tieneLlave() ? `Guardado. Buscando ${texto}…` : "Guardado");
 }
 
 // ---------- Precio a mano ----------
@@ -309,9 +348,18 @@ let tickerManual = null;
 function abrirManual(ticker) {
   tickerManual = ticker;
   const a = almacen.activo(ticker);
-  $("#manual-etiqueta").textContent = `Precio de ${ticker} (${calc.divisaDe(ticker)})`;
+  $("#manual-etiqueta").textContent = `Precio de ${nombreDe(ticker)} (${calc.divisaDe(ticker)})`;
   $("#manual-precio").value = a?.precioManual?.precio ?? "";
   $("#dlg-manual").showModal();
+}
+
+// ---------- Buscar con otro nombre (si el robot no encuentra el valor o se equivoca) ----------
+let tickerRenombrar = null;
+function abrirRenombrar(ticker) {
+  tickerRenombrar = ticker;
+  $("#renombrar-texto").value = almacen.activo(ticker)?.nombre || "";
+  $("#dlg-renombrar").showModal();
+  $("#renombrar-texto").select();
 }
 
 // ---------- Conectar ----------
@@ -355,6 +403,7 @@ function iniciarEventos() {
     if (accion === "conectar") abrirConectar();
     else if (accion === "nueva") abrirOp({ ticker: b.dataset.ticker });
     else if (accion === "manual") abrirManual(b.dataset.ticker);
+    else if (accion === "renombrar") abrirRenombrar(b.dataset.ticker);
     else if (accion === "actualizar") actualizarPrecios();
     else if (accion === "desconectar") {
       if (confirm("¿Quitar la llave de este navegador? Tu cartera seguirá guardada en GitHub.")) almacen.desconectar();
@@ -381,6 +430,16 @@ function iniciarEventos() {
     const t = fila.closest(".posicion").dataset.ticker;
     abiertos.has(t) ? abiertos.delete(t) : abiertos.add(t);
     pintarPosiciones(ultimo);
+  });
+  // Elegir otro valor de la lista "¿No es este valor?"
+  $("#posiciones").addEventListener("change", (e) => {
+    const sel = e.target.closest("[data-elegir]");
+    if (!sel) return;
+    const a = almacen.activo(sel.dataset.elegir);
+    if (!a) return;
+    almacen.guardarActivo({ ...a, simbolo: sel.value });
+    tickerNuevoPendiente = tieneLlave();
+    avisar("Cambiado. Trayendo el precio del valor elegido…");
   });
   // Editar una operación
   $("#operaciones").addEventListener("click", (e) => {
@@ -420,6 +479,19 @@ function iniciarEventos() {
     $("#dlg-manual").close();
   });
   $("#btn-cancelar-manual").addEventListener("click", () => $("#dlg-manual").close());
+
+  // Buscar con otro nombre: se olvida el símbolo y el robot vuelve a buscar
+  $("#form-renombrar").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const a = almacen.activo(tickerRenombrar), texto = $("#renombrar-texto").value.trim();
+    if (a && texto) {
+      almacen.guardarActivo({ ...a, nombre: texto, simbolo: undefined });
+      tickerNuevoPendiente = tieneLlave();
+      avisar(`Buscando ${texto}…`);
+    }
+    $("#dlg-renombrar").close();
+  });
+  $("#btn-cancelar-renombrar").addEventListener("click", () => $("#dlg-renombrar").close());
 
   // Conectar con GitHub
   $("#form-llave").addEventListener("submit", async (e) => {
@@ -461,7 +533,7 @@ almacen.alCambiar((que) => {
     cot.pedirActualizacion().catch((e) => avisar(e.message));
   }
 });
-cot.alCambiar(pintar);
+cot.alCambiar(() => { apuntarSimbolosEncontrados(); pintar(); });
 
 pintarTema();
 pintarOjo();

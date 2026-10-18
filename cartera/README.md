@@ -40,17 +40,21 @@ Para gastar menos, cambia el `cron` en `WEBS/.github/workflows/cartera-cotizar.y
 | `js/graficos.js` | Los gráficos (SVG hecho a mano, sin librerías) |
 | `js/formato.js` | Cómo se escriben euros, porcentajes y fechas |
 | `js/github.js` | Habla con la API de GitHub con tu llave |
-| `robot/cotizar.py` | El robot: trae los precios de Yahoo (Python sin librerías externas) |
+| `robot/cotizar.py` | El robot: busca el símbolo si escribiste el nombre y trae los precios de Yahoo (Python sin librerías externas) |
 | `../.github/workflows/cotizar-cartera.yml` | Workflow reutilizable que ejecuta el robot (lo llama `WEBS`) |
 
 ## Cómo se usa
 
-1. Abre la web y pulsa **+** para apuntar una compra. El valor se escribe con su símbolo de Yahoo
-   Finance: `AAPL` (Apple), `SAN.MC` (Santander, Madrid), `IWDA.AS` (ETF MSCI World, Ámsterdam), `BTC-EUR`.
+1. Abre la web y pulsa **+** para apuntar una compra. Escribe el valor como quieras: el nombre
+   ("Amazon", "Santander"), el **ISIN** (lo más seguro, sale en la ficha del valor en tu bróker) o el símbolo (`AMZN`).
+   El robot busca el símbolo en Yahoo y elige el que tiene un precio parecido al que pagaste
+   (en bolsa europea si pagaste en euros). Si no acierta, en la ficha del valor puedes elegir otro
+   de la lista o "Buscar con otro nombre".
 2. Conecta GitHub (⋯ → Sincronizar) con la misma llave del Vigilante. La llave necesita
    permiso **Contents** y **Actions** (Read and write) sobre `WEBS`.
 3. El robot trae el precio en menos de un minuto. Si no lo encuentra, sale "⚠ sin precio":
-   revisa el símbolo o pon el precio a mano en la ficha del valor.
+   búscalo con otro nombre (mejor el ISIN) o pon el precio a mano en la ficha del valor.
 
 **Probar el robot sin tocar nada:** en GitHub → WEBS → Actions → "Cartera - cotizaciones" →
-Run workflow, y escribe símbolos en "prueba" (por ejemplo `AAPL,SAN.MC`). Muestra los precios en el registro.
+Run workflow, y escribe valores en "prueba" (por ejemplo `amazon,SAN.MC` o `amazon=216` para comprobar
+también el precio pagado). Muestra lo que encuentra en el registro.
