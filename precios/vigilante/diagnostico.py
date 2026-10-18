@@ -1,65 +1,70 @@
 """
-diagnostico.py - Prueba temporal: guarda trozos del HTML de las tiendas que no se leen,
-para ajustar el lector. Escribe <datos>/datos/diagnostico.json. No lo usa la web.
+diagnostico.py - Prueba temporal: qué imitaciones de navegador pasan el bloqueo de cada tienda
+y si el buscador acepta búsquedas por tienda (site:). Escribe <datos>/datos/diagnostico.json. No lo usa la web.
 """
 import json
-import re
 import sys
 import time
 from pathlib import Path
 
 from bs4 import BeautifulSoup
+from curl_cffi import requests as http
 
 import scraper
 
 URLS = [
+    "https://www.carrefour.es/altavoz-inalambrico-jbl-charge-5-negro/VC4A-13856264/p",
     "https://www.pccomponentes.com/freidora-de-aire-cosori-smart-chef-edition-55-l-1700-w-wi-fi",
     "https://www.notino.es/diesel/only-the-brave-eau-de-toilette-para-hombre/",
-    "https://www.primor.eu/es_es/diesel-only-the-brave-eau-de-toilette-84982.html",
-    "https://www.fnac.es/Freidora-de-aire-sin-aceite-Cosori-Premium-Chef-Edition-1700W-5-5L-Blanca-Pequeno-electrodomestico-Freidora/a9034293",
-    "https://www.aromas.es/jpg-lemale-elixir-parfum-edp-hombre/136959M.html",
-    "https://www.perfumesclub.com/es/diesel/only-the-brave-eau-de-toilette-vaporizador/p_35162/",
+    "https://www.sephora.es/p/the-one-for-men---eau-de-parfum-P340017.html",
 ]
-LIMITE = 360  # segundos en total
+IMITACIONES = ["chrome", "chrome131_android", "edge", "firefox", "safari", "safari_ios", "chrome_android"]
+BUSQUEDAS = ["dolce gabbana the one hombre (site:druni.es OR site:primor.eu OR site:notino.es OR site:douglas.es)",
+             "google pixel 10a site:mediamarkt.es"]
+LIMITE = 300
 
 
-def resumen(html):
-    soup = BeautifulSoup(html, "html.parser")
-    jsonld = [b.get_text()[:500] for b in soup.find_all("script", type="application/ld+json")][:4]
-    metas = {(m.get("property") or m.get("name") or m.get("itemprop")): m.get("content")
-             for m in soup.find_all("meta") if "price" in str(m.get("property") or m.get("name") or m.get("itemprop") or "").lower()}
-    itemprop = [str(e)[:200] for e in soup.find_all(attrs={"itemprop": re.compile("price", re.I)})][:4]
-    trozos = [html[max(0, m.start() - 120):m.end() + 80].replace("\n", " ")
-              for m in re.finditer(r'"(?:price|salePrice|finalPrice|sellingPrice|priceAmount)"\s*:', html)][:6]
-    euros = [html[max(0, m.start() - 150):m.end() + 20].replace("\n", " ")
-             for m in re.finditer(r"\d{1,4},\d{2}\s?(?:€|&euro;)", html)][:4]
-    texto = soup.get_text(" ", strip=True)
-    return {"largo": len(html), "titulo": soup.title.get_text(strip=True)[:120] if soup.title else None,
-            "marcas": [m for m in scraper.MARCAS_BLOQUEO if m in html[:200000].lower()],
-            "jsonld": jsonld, "metas": metas, "itemprop": itemprop, "json_precio": trozos, "euros": euros,
-            "texto": texto[:400]}
+def probar(url, imitar, calentar):
+    t = time.time()
+    try:
+        s = http.Session(impersonate=imitar)
+        if calentar:
+            s.get("https://" + url.split("/")[2] + "/", headers=scraper.CABECERAS, timeout=20)
+            time.sleep(1)
+        r = s.get(url, headers=scraper.CABECERAS, timeout=20)
+        res = {"http": r.status_code, "s": round(time.time() - t, 1)}
+        if r.status_code == 200:
+            try:
+                d = scraper.analizar(r.text, url)
+                res.update(precio=d["precio"], titulo=(d["titulo"] or "")[:80])
+            except scraper.ErrorLectura as e:
+                res["error"] = f"{e.tipo}: {e}"[:100]
+                res["titulo_pagina"] = (BeautifulSoup(r.text, "html.parser").title or "").__str__()[:100]
+        return res
+    except Exception as e:
+        return {"excepcion": f"{type(e).__name__}: {e}"[:120]}
 
 
 def main():
     salida = Path(sys.argv[1]) / "datos" / "diagnostico.json"
     informe, inicio = {}, time.time()
+    for q in BUSQUEDAS:
+        try:
+            informe[q] = [r["url"][:100] for r in scraper._resultados_bing(q)][:10]
+        except Exception as e:
+            informe[q] = f"{type(e).__name__}: {e}"[:150]
+        try:
+            informe["ddg: " + q] = [r["url"][:100] for r in scraper._resultados_duckduckgo(q)][:10]
+        except Exception as e:
+            informe["ddg: " + q] = f"{type(e).__name__}: {e}"[:150]
+    salida.write_text(json.dumps(informe, ensure_ascii=False, indent=1), encoding="utf-8")
     for url in URLS:
         fila = {}
-        for metodo in ("chrome", "safari_ios", "navegador"):
-            if time.time() - inicio > LIMITE:
-                fila[metodo] = "sin tiempo"
-                continue
-            t = time.time()
-            try:
-                html = scraper.descargar_navegador(url, espera=12) if metodo == "navegador" \
-                    else scraper.descargar(url, imitar=metodo)
-                fila[metodo] = resumen(html)
-            except scraper.ErrorLectura as e:
-                fila[metodo] = f"{e.tipo}: {e}"
-            except Exception as e:
-                fila[metodo] = f"{type(e).__name__}: {e}"[:200]
-            if isinstance(fila[metodo], dict):
-                fila[metodo]["s"] = round(time.time() - t, 1)
+        for imitar in IMITACIONES:
+            for calentar in (False, True):
+                if time.time() - inicio > LIMITE:
+                    break
+                fila[f"{imitar}{' +portada' if calentar else ''}"] = probar(url, imitar, calentar)
         informe[url] = fila
         salida.write_text(json.dumps(informe, ensure_ascii=False, indent=1), encoding="utf-8")
         print(url[:70], round(time.time() - inicio))
