@@ -120,6 +120,10 @@ TIPO_DE_YAHOO = {"equity": "accion", "etf": "etf", "mutualfund": "fondo", "crypt
 # Bolsas en euros, de más a menos preferida: Xetra (la de más volumen para empresas de fuera)
 # y las bolsas "de casa" de las empresas europeas; Frankfurt y las pequeñas, al final (datos más pobres)
 BOLSAS_EUR = ["GER", "AMS", "PAR", "MIL", "MCE", "BRU", "LIS", "HEL", "IOB", "VIE", "FRA", "STU", "MUN", "BER", "DUS", "HAM", "HAN"]
+# Bolsas "grandes": se prueban antes que las exóticas (Colombia, Brasil...), que a veces tienen copias raras
+BOLSAS_GRANDES = set(BOLSAS_EUR) | {"NMS", "NYQ", "NGM", "NCM", "PCX", "ASE", "BTS", "LSE", "EBS", "TOR", "HKG", "CCC"}
+# Gestoras de ETF: los brókers a veces quitan su nombre ("Core S&P 500 USD (Acc)" es de iShares)
+GESTORAS = ["iShares", "Vanguard", "Xtrackers", "Amundi", "SPDR", "Invesco"]
 PARECE_SIMBOLO = re.compile(r"^[A-Z0-9^][A-Z0-9.\-=^]{0,14}$")
 PARECE_ISIN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
 # Palabras que no ayudan a reconocer un valor
@@ -168,17 +172,24 @@ def buscar(texto):
     return res
 
 
-def textos_de_busqueda(clave, nombre):
-    """Qué buscar: el nombre que escribiste y la clave, sin paréntesis primero y juntando palabras ("Space X" -> "SpaceX")."""
+def textos_de_busqueda(clave, nombre, tipo=None):
+    """Qué buscar: el nombre que escribiste y la clave, sin paréntesis primero y juntando palabras ("Space X" -> "SpaceX").
+    Si parece un ETF sin gestora ("Core S&P 500 USD (Acc)"), se prueba también con las gestoras más comunes."""
     vistos, salida = set(), []
+    def poner(v):
+        v = re.sub(r"\s+", " ", v).strip()
+        if v and v.lower() not in vistos:
+            vistos.add(v.lower())
+            salida.append(v)
     for t in (nombre, clave):
-        if not t:
-            continue
-        for v in (re.sub(r"[()]", " ", t), re.sub(r"\(.*?\)", " ", t), t, t.replace(" ", "")):
-            v = re.sub(r"\s+", " ", v).strip()
-            if v and v.lower() not in vistos:
-                vistos.add(v.lower())
-                salida.append(v)
+        if t:
+            for v in (re.sub(r"[()]", " ", t), re.sub(r"\(.*?\)", " ", t), t, t.replace(" ", "")):
+                poner(v)
+    base = nombre or clave
+    if base and (tipo == "etf" or re.search(r"\b(acc|dist|ucits)\b", base, re.I)) \
+            and not any(g.lower() in base.lower() for g in GESTORAS):
+        for g in GESTORAS:
+            poner(f"{g} {re.sub(r'[()]', ' ', base)}")
     return salida
 
 
@@ -250,30 +261,42 @@ def resolver(clave, info):
         except Exception:
             pass
 
-    # Si no, se busca por el nombre y se prueba cada candidato hasta que uno encaje
-    candidatos, probados = [], set()
+    # Si no, se busca por el nombre y se prueba cada candidato hasta que uno encaje.
+    # Primera vuelta: solo bolsas grandes; segunda: cualquiera.
     en_euros = info.get("divisa", "EUR") == "EUR"
-    for texto in textos_de_busqueda(clave, info.get("nombre")):
-        try:
-            encontrados = buscar(texto)
-        except Exception:
-            continue
-        for c in encontrados:
-            if all(c["simbolo"] != x["simbolo"] for x in candidatos):
-                candidatos.append(c)
-        for c in ordenar(encontrados, info.get("tipo"), en_euros)[:6]:
-            if c["simbolo"] in probados:
-                continue
-            probados.add(c["simbolo"])
-            try:
-                cot = cotizar(c["simbolo"], info["desde"])
-            except Exception:
-                continue
-            if encaja(cot, info):
-                return cot, candidatos[:8]
+    textos = textos_de_busqueda(clave, info.get("nombre"), info.get("tipo"))
+    resultados = {}
+    candidatos, probados = [], set()
+    for vuelta in ("grandes", "todas"):
+        for texto in textos:
+            if texto not in resultados:
+                try:
+                    resultados[texto] = buscar(texto)
+                except Exception:
+                    resultados[texto] = []
+                for c in resultados[texto]:
+                    if all(c["simbolo"] != x["simbolo"] for x in candidatos):
+                        candidatos.append(c)
+            for c in ordenar(resultados[texto], info.get("tipo"), en_euros)[:8]:
+                if c["simbolo"] in probados or (vuelta == "grandes" and c["codigoBolsa"] not in BOLSAS_GRANDES):
+                    continue
+                probados.add(c["simbolo"])
+                try:
+                    cot = cotizar(c["simbolo"], info["desde"])
+                except Exception:
+                    continue
+                if encaja(cot, info):
+                    return cot, candidatos[:8]
     if candidatos:
-        raise ValueError("encuentro valores parecidos, pero ninguno con un precio como el que pagaste")
+        raise NoEncaja(candidatos[:8])
     raise ValueError("no encuentro ningún valor con ese nombre")
+
+
+class NoEncaja(ValueError):
+    """Hay valores parecidos, pero ninguno con un precio como el que pagaste: se guardan para elegir a mano."""
+    def __init__(self, candidatos):
+        super().__init__("encuentro valores parecidos, pero ninguno con un precio como el que pagaste")
+        self.candidatos = candidatos
 
 
 def valores_de(cartera, anterior):
@@ -291,10 +314,12 @@ def valores_de(cartera, anterior):
                 "desde": f,
                 "nombre": a.get("nombre"),
                 "tipo": a.get("tipo"),
-                # el símbolo que eligió la web, o el que encontró el robot la vez anterior
-                "simbolo": a.get("simbolo") or (previos.get(clave) or {}).get("simbolo"),
+                # el símbolo que eligió la web, o el que encontró el robot la vez anterior con ese mismo nombre
+                "simbolo": a.get("simbolo") or ((previos.get(clave) or {}).get("simbolo")
+                                                if (previos.get(clave) or {}).get("buscado") == a.get("nombre") else None),
                 "divisa": op.get("divisa") or "EUR",
-                "candidatos": (previos.get(clave) or {}).get("candidatos"),
+                "candidatos": (previos.get(clave) or {}).get("candidatos")
+                              if (previos.get(clave) or {}).get("buscado") == a.get("nombre") else None,
             }
         valores[clave]["desde"] = min(f, valores[clave]["desde"])
         if op.get("tipo") == "compra" and op.get("precio"):   # para comprobar que el valor encontrado es el bueno
@@ -335,7 +360,7 @@ def main():
         valores = valores_de(json.loads(archivo.read_text(encoding="utf-8")), anterior)
     desde = {clave: info["desde"] for clave, info in valores.items()}
 
-    salida = {"actualizado": None, "activos": {}, "divisas": {}, "errores": {}}
+    salida = {"actualizado": None, "activos": {}, "divisas": {}, "errores": {}, "opciones": {}}
     for clave, info in sorted(valores.items()):
         try:
             cot, candidatos = resolver(clave, info)
@@ -343,9 +368,12 @@ def main():
             candidatos = candidatos or info.get("candidatos")   # las opciones de la búsqueda se conservan
             if candidatos:
                 cot["candidatos"] = [{k: c[k] for k in ("simbolo", "nombre", "bolsa", "tipo")} for c in candidatos]
+            cot["buscado"] = info.get("nombre")
             salida["activos"][clave] = cot
         except Exception as e:
             salida["errores"][clave] = str(e)[:120]
+            if isinstance(e, NoEncaja):   # para que puedas elegir tú cuál es
+                salida["opciones"][clave] = [{k: c[k] for k in ("simbolo", "nombre", "bolsa", "tipo")} for c in e.candidatos]
             # Si falla, se mantiene el último precio conocido (la web avisa del error)
             if clave in (anterior.get("activos") or {}):
                 salida["activos"][clave] = anterior["activos"][clave]
@@ -375,6 +403,8 @@ def main():
             print(f"{m}->EUR      {fx['precio']}")
         for s, e in salida["errores"].items():
             print(f"ERROR {s}: {e}")
+            for o in salida["opciones"].get(s, [])[:5]:
+                print(f"{'':26}· {o['simbolo']:10} {o['tipo']:6} {o['bolsa']:12} {o['nombre']}")
         return
 
     Path(a.salida).write_text(json.dumps(salida, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
