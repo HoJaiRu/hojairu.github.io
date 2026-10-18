@@ -12,7 +12,7 @@ Solo usa la librería estándar de Python (no hay que instalar nada, así arranc
 A Yahoo solo se le pide el símbolo de cada valor: nunca las cantidades ni nada tuyo.
 
 Uso:  python cotizar.py --datos cartera --salida cotizaciones.json
-      python cotizar.py --prueba "AAPL,amazon,Core S&P 500"   (solo prueba: muestra los precios)
+      python cotizar.py --prueba "AAPL,amazon=220,bitcoin=75000=cripto"   (solo prueba: muestra los precios)
 """
 
 import argparse
@@ -116,22 +116,51 @@ def cotizar(simbolo, desde):
 
 # ---------- Buscar el símbolo a partir del nombre ----------
 TIPOS = {"EQUITY": "accion", "ETF": "etf", "MUTUALFUND": "fondo", "CRYPTOCURRENCY": "cripto"}
-# Bolsas que cotizan en euros, de más a menos preferida (Xetra primero: es la de más volumen)
-BOLSAS_EUR = ["GER", "FRA", "AMS", "PAR", "MIL", "MCE", "BRU", "STU", "MUN", "BER", "DUS", "HAM", "VIE", "LIS", "HEL", "IOB"]
+TIPO_DE_YAHOO = {"equity": "accion", "etf": "etf", "mutualfund": "fondo", "cryptocurrency": "cripto"}
+# Bolsas en euros, de más a menos preferida: Xetra (la de más volumen para empresas de fuera)
+# y las bolsas "de casa" de las empresas europeas; Frankfurt y las pequeñas, al final (datos más pobres)
+BOLSAS_EUR = ["GER", "AMS", "PAR", "MIL", "MCE", "BRU", "LIS", "HEL", "IOB", "VIE", "FRA", "STU", "MUN", "BER", "DUS", "HAM", "HAN"]
 PARECE_SIMBOLO = re.compile(r"^[A-Z0-9^][A-Z0-9.\-=^]{0,14}$")
+PARECE_ISIN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
+# Palabras que no ayudan a reconocer un valor
+VACIAS = {"usd", "eur", "acc", "dist", "inc", "the", "class", "ord", "shares", "ucits", "etf", "corp", "ltd", "sa", "nv", "plc", "ag", "se"}
+SUFIJOS = re.compile(r"\b(incorporated|inc|corporation|corp|company|co|limited|ltd|plc|n\.?v|s\.?a|ag|se|holdings?|group)\b\.?")
+
+
+def normalizar(t):
+    return re.sub(r"[^a-z0-9& ]+", " ", (t or "").lower()).strip()
+
+
+def empresa(nombre):
+    """Las dos primeras palabras del nombre, sin "Inc.", "Ltd"...: para saber si dos listados son la misma empresa."""
+    return " ".join(SUFIJOS.sub(" ", normalizar(nombre)).split()[:2])
+
+
+def palabra_clave(texto):
+    """La primera palabra que de verdad identifica el valor ("Alphabet (A)" -> "alphabet")."""
+    for w in normalizar(re.sub(r"\(.*?\)", " ", texto)).split():
+        if len(w) >= 2 and w not in VACIAS:
+            return w
+    return None
 
 
 def buscar(texto):
-    """Lista de valores que encajan con un texto (nombre, símbolo o ISIN) según Yahoo."""
+    """Lista de valores que encajan con un texto (nombre, símbolo o ISIN) según Yahoo,
+    quitando los que no tienen nada que ver (Yahoo a veces devuelve cualquier cosa)."""
     datos = pedir(URL_BUSCAR.format(urllib.parse.quote(texto)))
+    clave = None if PARECE_ISIN.match(texto.upper()) else palabra_clave(texto)
     res = []
     for q in datos.get("quotes") or []:
         tipo = TIPOS.get(q.get("quoteType"))
-        if not tipo or not q.get("symbol"):
+        nombre = q.get("longname") or q.get("shortname") or q.get("symbol") or ""
+        if not tipo or not q.get("symbol") or "derivatives" in nombre.lower():
+            continue
+        hay = normalizar(nombre + " " + q["symbol"])
+        if clave and clave not in hay and clave not in hay.replace(" ", ""):
             continue
         res.append({
             "simbolo": q["symbol"],
-            "nombre": q.get("longname") or q.get("shortname") or q["symbol"],
+            "nombre": nombre,
             "bolsa": q.get("exchDisp") or q.get("exchange") or "",
             "codigoBolsa": q.get("exchange") or "",
             "tipo": tipo,
@@ -140,12 +169,12 @@ def buscar(texto):
 
 
 def textos_de_busqueda(clave, nombre):
-    """Qué buscar: el nombre que escribiste y la clave, con y sin paréntesis ("Alphabet (A)" -> "Alphabet A")."""
+    """Qué buscar: el nombre que escribiste y la clave, sin paréntesis primero y juntando palabras ("Space X" -> "SpaceX")."""
     vistos, salida = set(), []
     for t in (nombre, clave):
         if not t:
             continue
-        for v in (t, re.sub(r"[()]", " ", t), re.sub(r"\(.*?\)", " ", t)):
+        for v in (re.sub(r"[()]", " ", t), re.sub(r"\(.*?\)", " ", t), t, t.replace(" ", "")):
             v = re.sub(r"\s+", " ", v).strip()
             if v and v.lower() not in vistos:
                 vistos.add(v.lower())
@@ -153,54 +182,98 @@ def textos_de_busqueda(clave, nombre):
     return salida
 
 
-def elegir(candidatos, tipo_deseado=None, en_euros=True):
-    """El candidato más probable: el primero de Yahoo (del tipo que dijiste, si lo dijiste)
-    y, si pagaste en euros, su versión en una bolsa europea si existe."""
-    if not candidatos:
-        return None
-    if tipo_deseado and tipo_deseado not in ("otro", "auto"):
-        del_tipo = [c for c in candidatos if c["tipo"] == tipo_deseado]
-        candidatos = del_tipo or candidatos
-    base = candidatos[0]
-    if base["tipo"] == "cripto":
-        # BTC-USD -> BTC-EUR si pagaste en euros
-        raiz = base["simbolo"].rsplit("-", 1)[0]
-        return {**base, "simbolo": f"{raiz}-{'EUR' if en_euros else 'USD'}"}
-    if en_euros:
-        mismo = [c for c in candidatos if c["nombre"] == base["nombre"] and c["codigoBolsa"] in BOLSAS_EUR]
-        mismo.sort(key=lambda c: BOLSAS_EUR.index(c["codigoBolsa"]))
-        if mismo:
-            return mismo[0]
-    return base
+def ordenar(candidatos, tipo_deseado, en_euros):
+    """Orden en que se prueban: primero el tipo que dijiste; por empresa, en el orden de Yahoo;
+    y dentro de cada empresa, su listado en euros si pagaste en euros."""
+    if tipo_deseado in TIPOS.values():
+        candidatos = sorted(candidatos, key=lambda c: c["tipo"] != tipo_deseado)
+    orden_empresa = {}
+    for c in candidatos:
+        orden_empresa.setdefault(empresa(c["nombre"]), len(orden_empresa))
+    def peso(i_c):
+        i, c = i_c
+        bolsa = BOLSAS_EUR.index(c["codigoBolsa"]) if en_euros and c["codigoBolsa"] in BOLSAS_EUR else 99
+        return (orden_empresa[empresa(c["nombre"])], bolsa, i)
+    res = [c for _, c in sorted(enumerate(candidatos), key=peso)]
+    # Criptos: BTC-USD -> probar antes BTC-EUR si pagaste en euros
+    salida = []
+    for c in res:
+        if c["tipo"] == "cripto" and en_euros and c["simbolo"].endswith("-USD"):
+            salida.append({**c, "simbolo": c["simbolo"][:-4] + "-EUR"})
+        salida.append(c)
+    return salida
+
+
+_cambios = {"EUR": 1.0}
+def a_euros(divisa):
+    """Cuántos euros vale 1 unidad de una moneda (se pide una vez por moneda)."""
+    if divisa not in _cambios:
+        try:
+            _cambios[divisa] = cotizar(f"{divisa}EUR=X", date.today())["precio"]
+        except Exception:
+            _cambios[divisa] = None
+    return _cambios[divisa]
+
+
+def encaja(cot, info):
+    """¿Este valor puede ser el tuyo? Su precio tiene que parecerse al que pagaste
+    (entre 0,4 y 2,5 veces) y, si dijiste que es cripto, tiene que ser cripto."""
+    if info.get("tipo") == "cripto" and TIPO_DE_YAHOO.get(cot["tipo"]) != "cripto":
+        return False
+    pagado = info.get("precioCompra")
+    if not pagado:
+        return True
+    fx_cot, fx_pago = a_euros(cot["divisa"]), a_euros(info.get("divisa", "EUR"))
+    if not fx_cot or not fx_pago:
+        return True
+    r = (cot["precio"] * fx_cot) / (pagado * fx_pago)
+    return 0.4 <= r <= 2.5
 
 
 def resolver(clave, info):
     """Encuentra el símbolo de un valor y trae su precio. Devuelve (cotización, candidatos)."""
-    if info.get("simbolo"):
+    if info.get("simbolo"):   # ya elegido (por la web o por el robot otra vez)
         return cotizar(info["simbolo"], info["desde"]), None
-    if PARECE_SIMBOLO.match(clave):
+
+    # ¿Lo escribiste como símbolo (AMZN, SAN.MC, BTC)? Se prueba directamente
+    escrito = (info.get("nombre") or clave).strip()
+    directos = []
+    if info.get("tipo") == "cripto" and "-" not in escrito:
+        directos.append(f"{escrito.upper()}-{'EUR' if info.get('divisa', 'EUR') == 'EUR' else 'USD'}")
+    if escrito == escrito.upper() and PARECE_SIMBOLO.match(escrito):
+        directos.append(escrito)
+    for s in directos:
         try:
-            return cotizar(clave, info["desde"]), None
+            cot = cotizar(s, info["desde"])
+            if encaja(cot, info):
+                return cot, None
         except Exception:
-            pass  # no es un símbolo: se busca por nombre
-    candidatos = []
+            pass
+
+    # Si no, se busca por el nombre y se prueba cada candidato hasta que uno encaje
+    candidatos, probados = [], set()
+    en_euros = info.get("divisa", "EUR") == "EUR"
     for texto in textos_de_busqueda(clave, info.get("nombre")):
         try:
-            candidatos = buscar(texto)
+            encontrados = buscar(texto)
         except Exception:
             continue
-        if candidatos:
-            break
-    if not candidatos:
-        raise ValueError("no encuentro ningún valor con ese nombre")
-    elegido = elegir(candidatos, info.get("tipo"), info.get("divisa", "EUR") == "EUR")
-    probar = [elegido] + [c for c in candidatos if c["simbolo"] != elegido["simbolo"]][:2]
-    for c in probar:
-        try:
-            return cotizar(c["simbolo"], info["desde"]), candidatos[:8]
-        except Exception:
-            continue
-    raise ValueError("lo encuentro pero sin precio")
+        for c in encontrados:
+            if all(c["simbolo"] != x["simbolo"] for x in candidatos):
+                candidatos.append(c)
+        for c in ordenar(encontrados, info.get("tipo"), en_euros)[:6]:
+            if c["simbolo"] in probados:
+                continue
+            probados.add(c["simbolo"])
+            try:
+                cot = cotizar(c["simbolo"], info["desde"])
+            except Exception:
+                continue
+            if encaja(cot, info):
+                return cot, candidatos[:8]
+    if candidatos:
+        raise ValueError("encuentro valores parecidos, pero ninguno con un precio como el que pagaste")
+    raise ValueError("no encuentro ningún valor con ese nombre")
 
 
 def valores_de(cartera, anterior):
@@ -221,8 +294,12 @@ def valores_de(cartera, anterior):
                 # el símbolo que eligió la web, o el que encontró el robot la vez anterior
                 "simbolo": a.get("simbolo") or (previos.get(clave) or {}).get("simbolo"),
                 "divisa": op.get("divisa") or "EUR",
+                "candidatos": (previos.get(clave) or {}).get("candidatos"),
             }
         valores[clave]["desde"] = min(f, valores[clave]["desde"])
+        if op.get("tipo") == "compra" and op.get("precio"):   # para comprobar que el valor encontrado es el bueno
+            valores[clave]["precioCompra"] = op["precio"]
+            valores[clave]["divisa"] = op.get("divisa") or "EUR"
     return valores
 
 
@@ -243,7 +320,13 @@ def main():
 
     if a.prueba:
         hace_un_mes = date.today() - timedelta(days=30)
-        valores = {t.strip(): {"desde": hace_un_mes, "nombre": t.strip(), "divisa": "EUR"} for t in a.prueba.split(",") if t.strip()}
+        # Formato: "nombre" o "nombre=precio pagado en euros" o "nombre=precio=tipo" (para probar la comprobación de precio)
+        valores = {}
+        for t in a.prueba.split(","):
+            nombre, *resto = [x.strip() for x in t.split("=")]
+            if nombre:
+                valores[nombre] = {"desde": hace_un_mes, "nombre": nombre, "divisa": "EUR",
+                                   "precioCompra": float(resto[0]) if resto else None, "tipo": resto[1] if len(resto) > 1 else None}
     else:
         archivo = Path(a.datos) / "cartera.json"
         if not archivo.exists():
@@ -257,6 +340,7 @@ def main():
         try:
             cot, candidatos = resolver(clave, info)
             cot["simbolo"] = cot.pop("_simbolo")
+            candidatos = candidatos or info.get("candidatos")   # las opciones de la búsqueda se conservan
             if candidatos:
                 cot["candidatos"] = [{k: c[k] for k in ("simbolo", "nombre", "bolsa", "tipo")} for c in candidatos]
             salida["activos"][clave] = cot
